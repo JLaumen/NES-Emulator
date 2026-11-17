@@ -16,7 +16,8 @@ should be minimal, clear, and elegant. Common games should still play.
   `NoFieldSelectors`.
 - Modules: `Cartridge` (iNES parsing), `Bus` (CPU memory map), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
-  NOPs), `PPU` (registers, VRAM, per-scanline rendering), `NES` (public API:
+  NOPs), `PPU` (registers, VRAM, OAM; renders background and
+  sprites a scanline at a time), `NES` (public API:
   a lazy list of frames, run scanline by scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then

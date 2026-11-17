@@ -21,6 +21,6 @@ package sdl2
 
 Status: the CPU passes nestest's official-opcode tests
 (`cabal run nes -- --nestest nestest.nes` prints a trace) and the PPU draws
-backgrounds in a window; sprites and input are next.
+backgrounds and sprites in a window; input is next.
 
 MIT licensed.

@@ -6,7 +6,7 @@
 module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture) where
 
 import Cartridge (Cartridge (..), Mirroring (..))
-import Control.Monad (forM_)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.ST (ST)
 import Data.Array.ST (STUArray, freeze, newArray, newListArray, readArray, writeArray)
 import Data.Array.Unboxed (UArray, listArray, (!))
@@ -26,7 +26,8 @@ data Registers = Registers
     -- | Whether the next $2005/$2006 write is the second of a pair.
     latch :: !Bool,
     -- | $2007 reads lag one byte behind, except for the palette.
-    buffer :: !Word8
+    buffer :: !Word8,
+    oamAddr :: !Word8
   }
 
 data PPU s = PPU
@@ -34,6 +35,9 @@ data PPU s = PPU
     -- | The 16 KiB PPU address space, of which only the pattern tables, two
     -- nametables and the palette exist; see 'resolve'.
     memory :: STUArray s Word16 Word8,
+    -- | Object attribute memory: 64 sprites of 4 bytes (y, tile,
+    -- attributes, x).
+    oam :: STUArray s Int Word8,
     -- | Palette indices of the picture being drawn, row by row.
     pixels :: STUArray s Int Word8,
     mirroring :: Mirroring
@@ -41,10 +45,11 @@ data PPU s = PPU
 
 new :: Cartridge -> ST s (PPU s)
 new cart = do
-  regs <- newSTRef (Registers 0 0 0 0 0 0 False 0)
+  regs <- newSTRef (Registers 0 0 0 0 0 0 False 0 0)
   memory <- newListArray (0, 0x3FFF) (BS.unpack cart.chr ++ repeat 0)
+  oam <- newArray (0, 255) 0
   pixels <- newArray (0, 256 * 240 - 1) 0
-  pure PPU {regs, memory, pixels, mirroring = cart.mirroring}
+  pure PPU {regs, memory, oam, pixels, mirroring = cart.mirroring}
 
 -- | Map an address onto the memory that backs it: nametables onto two
 -- through mirroring, and the background colour of the sprite palettes onto
@@ -75,6 +80,7 @@ readRegister ppu addr = do
     2 -> do
       writeSTRef ppu.regs r {status = clearBit r.status 7, latch = False}
       pure r.status
+    4 -> readArray ppu.oam (fromIntegral r.oamAddr)
     7 -> do
       value <- peek ppu r.v
       writeSTRef ppu.regs r {v = r.v + increment r, buffer = value}
@@ -89,6 +95,10 @@ writeRegister ppu addr value = do
   case addr .&. 7 of
     0 -> set r {ctrl = value, t = r.t .&. 0xF3FF .|. (w .&. 3) `shiftL` 10}
     1 -> set r {mask = value}
+    3 -> set r {oamAddr = value}
+    4 -> do
+      writeArray ppu.oam (fromIntegral r.oamAddr) value
+      set r {oamAddr = r.oamAddr + 1}
     5
       | r.latch -> set r {t = r.t .&. 0x8C1F .|. (w .&. 7) `shiftL` 12 .|. (w .&. 0xF8) `shiftL` 2, latch = False}
       | otherwise -> set r {t = r.t .&. 0xFFE0 .|. w `shiftR` 3, fineX = value .&. 7, latch = True}
@@ -144,29 +154,83 @@ nextLine v
 render :: PPU s -> Int -> ST s ()
 render ppu y = do
   r <- readSTRef ppu.regs
+  sprites <- if testBit r.mask 4 then spritesOn ppu r y else pure []
   forM_ [0 .. 255] $ \x -> do
-    color <- if testBit r.mask 3 then background ppu r x else pure 0
+    back <- if testBit r.mask 3 then background ppu r x else pure 0
+    color <- case [(s, c) | s <- sprites, let c = spritePixel s x, c /= 0] of
+      (s, c) : _ -> do
+        -- Games time mid-frame effects, such as a fixed status bar, by
+        -- when sprite 0 first overlaps the background.
+        when (s.index == 0 && back /= 0 && x < 255) $
+          modifySTRef' ppu.regs (\r' -> r' {status = setBit r'.status 6})
+        pure (if back /= 0 && testBit s.attributes 5 then back else 0x10 .|. c)
+      [] -> pure back
     peek ppu (0x3F00 + color) >>= writeArray ppu.pixels (y * 256 + x)
 
--- | The background's palette entry (0–15, 0 when transparent) at pixel x of
--- the row that v points at.
+-- | The background's palette entry (0–15) at pixel x of the row that v
+-- points at.
 background :: PPU s -> Registers -> Int -> ST s Word16
 background ppu r x = do
   tile <- peek ppu (0x2000 .|. nametable .|. row `shiftL` 5 .|. column)
   attribute <- peek ppu (0x23C0 .|. nametable .|. (row `shiftR` 2) `shiftL` 3 .|. column `shiftR` 2)
-  let addr = (if testBit r.ctrl 4 then 0x1000 else 0) + fromIntegral tile * 16 + r.v `shiftR` 12
-      bit = 7 - fromIntegral (px .&. 7)
-  lo <- peek ppu addr
-  hi <- peek ppu (addr + 8)
-  let pixel = fromIntegral (fromEnum (testBit lo bit)) .|. fromIntegral (fromEnum (testBit hi bit)) `shiftL` 1
-      palette = fromIntegral (attribute `shiftR` fromIntegral ((row .&. 2) `shiftL` 1 .|. column .&. 2)) .&. 3
-  pure (if pixel == 0 then 0 else palette `shiftL` 2 .|. pixel)
+  planes <- patternRow ppu ((if testBit r.ctrl 4 then 0x1000 else 0) + fromIntegral tile * 16 + r.v `shiftR` 12)
+  let palette = fromIntegral (attribute `shiftR` fromIntegral ((row .&. 2) `shiftL` 1 .|. column .&. 2)) .&. 3
+  pure (shade palette planes (fromIntegral (px .&. 7)))
   where
     px = (r.v .&. 0x1F) * 8 + fromIntegral r.fineX + fromIntegral x
     -- Past the right edge of a nametable lies the next one across.
     nametable = r.v .&. 0x0C00 `xor` (px .&. 0x100) `shiftL` 2
     column = (px `shiftR` 3) .&. 0x1F
     row = (r.v `shiftR` 5) .&. 0x1F
+
+data Sprite = Sprite
+  { index, x :: Int,
+    -- | Palette (bits 0–1), behind the background (5), flipped
+    -- horizontally (6) and vertically (7).
+    attributes :: Word8,
+    -- | The bit planes of the sprite's row on this scanline.
+    planes :: (Word8, Word8)
+  }
+
+-- | The first eight sprites on a scanline, front to back.
+spritesOn :: PPU s -> Registers -> Int -> ST s [Sprite]
+spritesOn ppu r y = do
+  rows <- forM [0 .. 63] $ \i -> (i,) . (\top -> y - fromIntegral top - 1) <$> readArray ppu.oam (4 * i)
+  forM (take 8 [(i, row) | (i, row) <- rows, row >= 0, row < height]) $ \(i, row) -> do
+    tile <- fromIntegral <$> readArray ppu.oam (4 * i + 1)
+    attributes <- readArray ppu.oam (4 * i + 2)
+    x <- readArray ppu.oam (4 * i + 3)
+    let flipped = fromIntegral (if testBit attributes 7 then height - 1 - row else row)
+        (table, first)
+          | height == 8 = (if testBit r.ctrl 3 then 0x1000 else 0, tile)
+          | otherwise = (0x1000 * (tile .&. 1), tile .&. 0xFE)
+    -- Rows 8–15 of a tall sprite come from the tile after the first.
+    planes <- patternRow ppu (table + first * 16 + flipped + flipped .&. 8)
+    pure Sprite {index = i, x = fromIntegral x, attributes, planes}
+  where
+    height = if testBit r.ctrl 5 then 16 else 8
+
+-- | A sprite's palette entry (0–15) at pixel x of the scanline.
+spritePixel :: Sprite -> Int -> Word16
+spritePixel s x
+  | dx < 0 || dx > 7 = 0
+  | otherwise = shade (fromIntegral s.attributes .&. 3) s.planes (if testBit s.attributes 6 then 7 - dx else dx)
+  where
+    dx = x - s.x
+
+-- | The two bit planes of one row of a tile.
+patternRow :: PPU s -> Word16 -> ST s (Word8, Word8)
+patternRow ppu addr = (,) <$> peek ppu addr <*> peek ppu (addr + 8)
+
+-- | Pixel i (0–7, from the left) of a pattern row, in one of four
+-- palettes: a palette entry 0–15, or 0 when transparent.
+shade :: Word16 -> (Word8, Word8) -> Int -> Word16
+shade palette (lo, hi) i
+  | pixel == 0 = 0
+  | otherwise = palette `shiftL` 2 .|. pixel
+  where
+    pixel = plane lo .|. plane hi `shiftL` 1
+    plane b = fromIntegral (b `shiftR` (7 - i) .&. 1)
 
 -- | The finished picture: 256×240 pixels, 3 bytes (RGB) each.
 picture :: forall s. PPU s -> ST s ByteString

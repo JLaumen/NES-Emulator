@@ -5,6 +5,7 @@
 module Bus (Bus, new, load, store, loadWord) where
 
 import Cartridge (Cartridge (..))
+import Control.Monad (forM_)
 import Control.Monad.ST (ST)
 import Data.Array.ST (STUArray, newArray, readArray, writeArray)
 import Data.Bits (shiftL, (.&.), (.|.))
@@ -25,8 +26,8 @@ new cart ppu = do
   pure Bus {ram, ppu, cart}
 
 -- | Memory map: 2 KiB RAM mirrored up to $2000, PPU registers mirrored up
--- to $4000, cartridge from $8000. IO registers in between are not
--- connected yet.
+-- to $4000, cartridge from $8000. Of the IO registers in between, only
+-- OAM DMA is connected.
 load :: Bus s -> Word16 -> ST s Word8
 load bus addr
   | addr < 0x2000 = readArray bus.ram (addr .&. 0x7FF)
@@ -40,6 +41,10 @@ store :: Bus s -> Word16 -> Word8 -> ST s ()
 store bus addr value
   | addr < 0x2000 = writeArray bus.ram (addr .&. 0x7FF) value
   | addr < 0x4000 = PPU.writeRegister bus.ppu addr value
+  -- OAM DMA: copy a page to the sprites. (The CPU stalls for 513 cycles,
+  -- which we skip.)
+  | addr == 0x4014 = forM_ [0 .. 255] $ \i ->
+      load bus (fromIntegral value `shiftL` 8 + i) >>= PPU.writeRegister bus.ppu 0x2004
   | otherwise = pure ()
 
 -- | Load a little-endian word.
