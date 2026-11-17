@@ -29,7 +29,7 @@ should be minimal, clear, and elegant. Common games should still play.
   unofficial opcodes.
 - Toolchain: GHC 9.14 (pinned in `cabal.project`), GHC2024, cabal 3.18.
 - Build: `cabal build`. Run: `cabal run nes -- game.nes`.
-- Before committing: `ormolu -i $(git ls-files '*.hs')`, `cabal-gild --io=nes.cabal`,
+- Before committing: `ormolu -i $(git ls-files '*.hs')`, `cabal-gild nes.cabal`,
   `hlint .`, and `cabal build` must all pass cleanly. CI
   (`.github/workflows/ci.yml`) checks the same; keep tool versions in sync.
 - Keep README.md (for users), CLAUDE.md (for Claude) and PLAN.md (where we

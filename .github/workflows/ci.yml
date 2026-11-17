@@ -34,5 +34,5 @@ jobs:
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
           key: cabal-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('nes.cabal') }}
-      - run: sudo apt-get install -y libsdl2-dev
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - run: cabal build

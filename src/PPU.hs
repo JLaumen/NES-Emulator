@@ -45,7 +45,7 @@ data PPU s = PPU
 
 new :: Cartridge -> ST s (PPU s)
 new cart = do
-  regs <- newSTRef (Registers 0 0 0 0 0 0 False 0 0)
+  regs <- newSTRef Registers {ctrl = 0, mask = 0, status = 0, v = 0, t = 0, fineX = 0, latch = False, buffer = 0, oamAddr = 0}
   memory <- newListArray (0, 0x3FFF) (BS.unpack cart.chr ++ repeat 0)
   oam <- newArray (0, 255) 0
   pixels <- newArray (0, 256 * 240 - 1) 0

@@ -24,7 +24,7 @@ new :: ST s (Controller s)
 new = Controller <$> newSTRef 0 <*> newSTRef 0
 
 press :: Controller s -> [Button] -> ST s ()
-press c = writeSTRef c.held . foldr (flip setBit . fromEnum) 0
+press c = writeSTRef c.held . foldr (\button bits -> setBit bits (fromEnum button)) 0
 
 -- | Take a snapshot of the buttons held, on a write to $4016.
 latch :: Controller s -> ST s ()
