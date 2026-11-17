@@ -6,9 +6,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: haskell-actions/run-ormolu@v21
-        with:
-          version: 0.9.0.0
+      - run: |
+          curl -sSLo ormolu.zip https://github.com/tweag/ormolu/releases/download/0.9.0.0/ormolu-x86_64-linux.zip
+          unzip -q ormolu.zip
+          ./ormolu --mode check $(git ls-files '*.hs')
       - uses: tfausak/cabal-gild-setup-action@v2
         with:
           version: 1.8.4.2
