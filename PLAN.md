@@ -5,7 +5,7 @@ Each step ends with something we can check.
 1. [x] **Cartridge**: parse iNES files; mapper 0 only.
 2. [x] **CPU**: official 6502 opcodes; matches the first 5004 lines of
    nestest.log (see CLAUDE.md).
-3. [ ] **PPU background**: registers $2000–$2007, VRAM with mirroring,
+3. [x] **PPU background**: registers $2000–$2007, VRAM with mirroring,
    per-scanline background rendering into a framebuffer, vblank NMI.
    Check: a game's title screen is visible.
 4. [ ] **Window**: show frames at 60 Hz in `app/`.

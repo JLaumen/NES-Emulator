@@ -36,6 +36,7 @@ library
     Bus
     Cartridge
     CPU
+    PPU
 
   build-depends:
     array ^>=0.5.8,

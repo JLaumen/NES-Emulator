@@ -3,7 +3,7 @@
 
 -- | The 6502 CPU (the NES's 2A03 without decimal mode), one instruction at a
 -- time. Cycles are counted per instruction, not emulated individually.
-module CPU (CPU (..), reset, step, trace) where
+module CPU (CPU (..), reset, step, nmi, trace) where
 
 import Bus (Bus, load, loadWord, store)
 import Control.Monad.ST (ST)
@@ -23,6 +23,17 @@ reset :: Bus s -> ST s CPU
 reset bus = do
   pc <- loadWord bus 0xFFFC
   pure CPU {a = 0, x = 0, y = 0, sp = 0xFD, p = 0x24, pc, cycles = 7}
+
+-- | Answer a non-maskable interrupt, which the PPU raises at vblank.
+nmi :: Bus s -> CPU -> ST s CPU
+nmi bus cpu = interrupt bus 0xFFFA cpu.p cpu {cycles = cpu.cycles + 7}
+
+-- | Push PC and the given status, then jump through a vector.
+interrupt :: Bus s -> Word16 -> Word8 -> CPU -> ST s CPU
+interrupt bus vector status cpu = do
+  cpu' <- pushWord bus cpu.pc cpu >>= push bus status
+  target <- loadWord bus vector
+  pure (setFlag interruptDisable True cpu' {pc = target})
 
 -- | One line per state, in the columns of nestest.log.
 trace :: CPU -> String
@@ -276,11 +287,8 @@ execute bus op mode addr cpu = case op of
     (cpu', v) <- pull bus cpu
     (cpu'', ret) <- pullWord bus cpu'
     pure cpu'' {p = fromStack v, pc = ret}
-  BRK -> do
-    -- BRK skips a padding byte after the opcode.
-    cpu' <- pushWord bus (cpu.pc + 1) cpu >>= push bus (cpu.p .|. breakBits)
-    vector <- loadWord bus 0xFFFE
-    pure (setFlag interruptDisable True (jumpTo vector cpu'))
+  -- BRK skips a padding byte after the opcode.
+  BRK -> interrupt bus 0xFFFE (cpu.p .|. breakBits) cpu {pc = cpu.pc + 1}
   NOP -> pure cpu
   where
     withValue f = f <$> load bus addr

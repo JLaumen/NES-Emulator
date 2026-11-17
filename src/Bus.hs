@@ -10,22 +10,27 @@ import Data.Array.ST (STUArray, newArray, readArray, writeArray)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.ByteString qualified as BS
 import Data.Word (Word16, Word8)
+import PPU (PPU)
+import PPU qualified
 
 data Bus s = Bus
   { ram :: STUArray s Word16 Word8,
+    ppu :: PPU s,
     cart :: Cartridge
   }
 
-new :: Cartridge -> ST s (Bus s)
-new cart = do
+new :: Cartridge -> PPU s -> ST s (Bus s)
+new cart ppu = do
   ram <- newArray (0, 0x7FF) 0
-  pure Bus {ram, cart}
+  pure Bus {ram, ppu, cart}
 
--- | Memory map: 2 KiB RAM mirrored up to $2000, cartridge from $8000.
--- PPU and IO registers in between are not connected yet.
+-- | Memory map: 2 KiB RAM mirrored up to $2000, PPU registers mirrored up
+-- to $4000, cartridge from $8000. IO registers in between are not
+-- connected yet.
 load :: Bus s -> Word16 -> ST s Word8
 load bus addr
   | addr < 0x2000 = readArray bus.ram (addr .&. 0x7FF)
+  | addr < 0x4000 = PPU.readRegister bus.ppu addr
   | addr >= 0x8000 = pure (BS.index prg (fromIntegral (addr - 0x8000) `mod` BS.length prg))
   | otherwise = pure 0
   where
@@ -34,6 +39,7 @@ load bus addr
 store :: Bus s -> Word16 -> Word8 -> ST s ()
 store bus addr value
   | addr < 0x2000 = writeArray bus.ram (addr .&. 0x7FF) value
+  | addr < 0x4000 = PPU.writeRegister bus.ppu addr value
   | otherwise = pure ()
 
 -- | Load a little-endian word.

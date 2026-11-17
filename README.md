@@ -10,7 +10,7 @@ cabal run nes -- game.nes
 ```
 
 Status: the CPU passes nestest's official-opcode tests
-(`cabal run nes -- --nestest nestest.nes` prints a trace); graphics and
-input are next.
+(`cabal run nes -- --nestest nestest.nes` prints a trace) and the PPU draws
+backgrounds; a window, sprites and input are next.
 
 MIT licensed.

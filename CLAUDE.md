@@ -5,8 +5,8 @@ should be minimal, clear, and elegant. Common games should still play.
 
 - Scope: NTSC NES: 6502 CPU, PPU, controller, mapper 0.
   No audio, no cycle accuracy, no PAL (yet).
-- NTSC timing: 60 Hz, 262 scanlines, 3 PPU dots per CPU cycle. Keep these
-  constants in one place so PAL can be added later.
+- NTSC timing: 60 Hz, 262 scanlines, 3 PPU dots per CPU cycle. These
+  constants live in one place (`NES`) so PAL can be added later.
 - Pure core in `src/`, IO in `app/`.
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
@@ -16,7 +16,8 @@ should be minimal, clear, and elegant. Common games should still play.
   `NoFieldSelectors`.
 - Modules: `Cartridge` (iNES parsing), `Bus` (CPU memory map), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
-  NOPs), `NES` (public API).
+  NOPs), `PPU` (registers, VRAM, per-scanline rendering), `NES` (public API:
+  a lazy list of frames, run scanline by scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
   `sed -E 's/^(....).*(A:.. X:.. Y:.. P:.. SP:..).*(CYC:[0-9]+)\r?$/\1 \2 \3/' nestest.log > expected.txt`
