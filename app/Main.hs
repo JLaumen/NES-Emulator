@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -45,7 +46,7 @@ play cart = do
             SDL.present renderer -- waits for the refresh
             loop rest
           [] -> pure ()
-  loop . frames cart =<< getChanContents inputs
+  loop . map (.picture) . frames cart =<< getChanContents inputs
   SDL.quit
 
 keys :: [(SDL.Scancode, Button)]

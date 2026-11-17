@@ -3,11 +3,12 @@
 Goal: the simplest NES emulator, not the most accurate. Code and docs alike
 should be minimal, clear, and elegant. Common games should still play.
 
-- Scope: NTSC NES: 6502 CPU, PPU, controller, mapper 0.
-  No audio, no cycle accuracy, no PAL (yet).
-- NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle. These constants live
-  in one place (`NES`) so PAL can be added later. The window shows one frame
-  per screen refresh (vsync), so 60 Hz comes from the display.
+- Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0.
+  No cycle accuracy, no PAL (yet).
+- NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle, the CPU's clock rate.
+  These constants live in one place (`NES`; the APU's tables are NTSC too)
+  so PAL can be added later. The window shows one frame per screen refresh
+  (vsync), so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window via the `sdl2` package).
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
@@ -18,9 +19,10 @@ should be minimal, clear, and elegant. Common games should still play.
 - Modules: `Cartridge` (iNES parsing), `Bus` (CPU memory map), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
   NOPs), `PPU` (registers, VRAM, OAM; renders background and
-  sprites a scanline at a time), `Controller` ($4016), `NES` (public API:
-  a lazy list of frames from a lazy list of buttons held, run scanline by
-  scanline).
+  sprites a scanline at a time), `APU` (a pure state machine in an `STRef`,
+  caught up once a scanline; samples at 44.1 kHz), `Controller` ($4016), `NES`
+  (public API: a lazy list of frames, each a picture and its sound, from a
+  lazy list of buttons held, run scanline by scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
   `sed -E 's/^(....).*(A:.. X:.. Y:.. P:.. SP:..).*(CYC:[0-9]+)\r?$/\1 \2 \3/' nestest.log > expected.txt`

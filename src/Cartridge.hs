@@ -1,11 +1,13 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Cartridges in the iNES file format. Only mapper 0 is supported.
-module Cartridge (Cartridge (..), Mirroring (..), parse) where
+module Cartridge (Cartridge (..), Mirroring (..), parse, prgByte) where
 
 import Data.Bits (testBit, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.Word (Word16, Word8)
 
 data Mirroring = Horizontal | Vertical
 
@@ -37,3 +39,7 @@ parse rom
     chrStart = prgStart + prgSize
     chrSize = 0x2000 * fromIntegral (BS.index rom 5)
     slice start size = BS.take size (BS.drop start rom)
+
+-- | A byte of program ROM, which fills $8000–$FFFF (16 KiB twice over).
+prgByte :: Cartridge -> Word16 -> Word8
+prgByte cart addr = BS.index cart.prg (fromIntegral (addr - 0x8000) `mod` BS.length cart.prg)

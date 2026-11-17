@@ -33,6 +33,7 @@ library
   hs-source-dirs: src
   exposed-modules: NES
   other-modules:
+    APU
     Bus
     Cartridge
     Controller

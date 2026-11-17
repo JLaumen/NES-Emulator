@@ -3,7 +3,7 @@
 
 -- | The 6502 CPU (the NES's 2A03 without decimal mode), one instruction at a
 -- time. Cycles are counted per instruction, not emulated individually.
-module CPU (CPU (..), reset, step, nmi, trace) where
+module CPU (CPU (..), reset, step, nmi, irq, trace) where
 
 import Bus (Bus, load, loadWord, store)
 import Control.Monad.ST (ST)
@@ -27,6 +27,12 @@ reset bus = do
 -- | Answer a non-maskable interrupt, which the PPU raises at vblank.
 nmi :: Bus s -> CPU -> ST s CPU
 nmi bus cpu = interrupt bus 0xFFFA cpu.p cpu {cycles = cpu.cycles + 7}
+
+-- | Answer an interrupt request, unless interrupts are disabled.
+irq :: Bus s -> CPU -> ST s CPU
+irq bus cpu
+  | testBit cpu.p interruptDisable = pure cpu
+  | otherwise = interrupt bus 0xFFFE cpu.p cpu {cycles = cpu.cycles + 7}
 
 -- | Push PC and the given status, then jump through a vector.
 interrupt :: Bus s -> Word16 -> Word8 -> CPU -> ST s CPU

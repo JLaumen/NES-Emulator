@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE NoFieldSelectors #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), frames, nestest) where
+module NES (Cartridge, parseCartridge, Button (..), Frame (..), sampleRate, frames, nestest) where
 
+import APU qualified
 import Bus (Bus)
 import Bus qualified
 import CPU (CPU (..))
@@ -16,6 +18,7 @@ import Control.Monad.ST.Lazy qualified as Lazy
 import Controller (Button (..))
 import Controller qualified
 import Data.ByteString (ByteString)
+import Data.STRef (modifySTRef', readSTRef, writeSTRef)
 import PPU qualified
 
 -- * NTSC timing
@@ -25,39 +28,60 @@ scanlines = 262
 dotsPerLine = 341
 dotsPerCycle = 3
 
+-- | The CPU's clock rate in Hz.
+cpuRate :: Double
+cpuRate = 1789773
+
+-- | Sound samples per second.
+sampleRate :: Int
+sampleRate = 44100
+
 parseCartridge :: ByteString -> Either String Cartridge
 parseCartridge = Cartridge.parse
 
--- | The pictures a game shows, given the buttons held during each frame:
--- 256×240 pixels, 3 bytes (RGB) each. Each frame's buttons are needed only
--- once that frame is.
-frames :: Cartridge -> [[Button]] -> [ByteString]
+data Frame = Frame
+  { -- | 256×240 pixels, 3 bytes (RGB) each.
+    picture :: ByteString,
+    -- | The sound during the frame: mono, 'sampleRate' samples a second,
+    -- from -1 to 1.
+    sound :: [Float]
+  }
+
+-- | The frames a game shows, given the buttons held during each. Each
+-- frame's buttons are needed only once that frame is.
+frames :: Cartridge -> [[Button]] -> [Frame]
 frames cart inputs = Lazy.runST $ do
   (bus, cpu) <- strictToLazyST (boot cart)
   let run _ [] = pure []
       run state (buttons : rest) = do
-        (state', pic) <- strictToLazyST $ do
+        (state', out) <- strictToLazyST $ do
           Controller.press bus.controller buttons
           state' <- frame bus state
-          (state',) <$> PPU.picture bus.ppu
-        (pic :) <$> run state' rest
+          picture <- PPU.picture bus.ppu
+          (sound, apu) <- APU.drain <$> readSTRef bus.apu
+          writeSTRef bus.apu apu
+          pure (state', Frame {picture, sound})
+        (out :) <$> run state' rest
   run cpu inputs
 
 boot :: Cartridge -> ST s (Bus s, CPU)
 boot cart = do
-  bus <- Bus.new cart
+  bus <- Bus.new cart (APU.new cpuRate (fromIntegral sampleRate))
   cpu <- CPU.reset bus
   pure (bus, cpu)
 
 -- | Run a frame, from the pre-render line to the end of vblank, with the
--- CPU running alongside each scanline.
+-- CPU and APU running alongside each scanline.
 frame :: Bus s -> CPU -> ST s CPU
 frame bus start = foldM line start [-1 .. scanlines - 2]
   where
     line cpu n = do
       nmi <- PPU.startLine bus.ppu n
-      cpu' <- (if nmi then CPU.nmi bus else pure) cpu
+      irq <- APU.irq <$> readSTRef bus.apu
+      cpu' <- (if nmi then CPU.nmi bus else if irq then CPU.irq bus else pure) cpu
       cpu'' <- runUntil (start.cycles * dotsPerCycle + (n + 2) * dotsPerLine) cpu'
+      -- The APU catches up once a line, which is close enough for sound.
+      modifySTRef' bus.apu (APU.run bus.cart cpu''.cycles)
       cpu'' <$ PPU.endLine bus.ppu n
     runUntil dot cpu
       | cpu.cycles * dotsPerCycle >= dot = pure cpu

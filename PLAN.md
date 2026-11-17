@@ -11,11 +11,17 @@ Each step ends with something we can check.
 4. [x] **Window**: show frames in `app/`, one per screen refresh (vsync).
 5. [x] **Sprites**: OAM, OAM DMA ($4014), sprite-0 hit.
 6. [x] **Controller**: $4016 reads from the keyboard. Check: games play.
-
-All steps are done: Super Mario Bros. plays.
+7. [x] **APU**: pulse ×2, triangle, noise and DMC channels, frame counter,
+   IRQs, mixer; samples at 44.1 kHz with each frame. Check: SMB's music
+   rendered to a WAV file sounds right.
+8. [ ] **Sound**: play the samples through SDL; keep the audio buffer level
+   by nudging the playback rate (vsync paces the game). Check: games sound
+   right without crackles.
 
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
-are never hidden; only controller 1 is connected.
+are never hidden; only controller 1 is connected; the DMC doesn't steal
+CPU cycles; the APU catches up once a scanline and samples without
+filtering out aliasing.
 
-Later, maybe: PAL, more mappers, audio.
+Later, maybe: PAL, more mappers.
