@@ -2,11 +2,10 @@
 
 module Main (main) where
 
-import Control.Concurrent (getChanContents, newChan, threadDelay, writeChan)
+import Control.Concurrent (getChanContents, newChan, writeChan)
 import Control.Monad (unless)
 import Data.ByteString qualified as BS
-import GHC.Clock (getMonotonicTime)
-import NES (Button, Cartridge, frames, framesPerSecond, nestest, parseCartridge)
+import NES (Button, Cartridge, frames, nestest, parseCartridge)
 import NES qualified
 import SDL qualified
 import System.Environment (getArgs)
@@ -23,17 +22,19 @@ main = do
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 
--- | Play the game in a window, at three times the NES's resolution.
+-- | Play the game in a window, at three times the NES's resolution. Vsync
+-- paces the game: one frame per screen refresh, so a 60 Hz display is
+-- needed for the right speed.
 play :: Cartridge -> IO ()
 play cart = do
   SDL.initialize [SDL.InitVideo]
   window <- SDL.createWindow "nes" SDL.defaultWindow {SDL.windowInitialSize = SDL.V2 768 720}
-  renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer
+  renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer {SDL.rendererType = SDL.AcceleratedVSyncRenderer}
   texture <- SDL.createTexture renderer SDL.RGB24 SDL.TextureAccessStreaming (SDL.V2 256 240)
   -- The core reads the buttons for each frame lazily from this channel, so
   -- they must be in it before the frame is drawn.
   inputs <- newChan
-  let loop deadline pictures = do
+  let loop pictures = do
         events <- SDL.pollEvents
         held <- SDL.getKeyboardState
         writeChan inputs [button | (key, button) <- keys, held key]
@@ -41,13 +42,10 @@ play cart = do
           picture : rest -> do
             _ <- SDL.updateTexture texture Nothing picture (256 * 3)
             SDL.copy renderer texture Nothing Nothing
-            SDL.present renderer
-            now <- getMonotonicTime
-            threadDelay (round ((deadline - now) * 1e6))
-            loop (max now deadline + 1 / fromIntegral framesPerSecond) rest
+            SDL.present renderer -- waits for the refresh
+            loop rest
           [] -> pure ()
-  start <- getMonotonicTime
-  loop start . frames cart =<< getChanContents inputs
+  loop . frames cart =<< getChanContents inputs
   SDL.quit
 
 keys :: [(SDL.Scancode, Button)]

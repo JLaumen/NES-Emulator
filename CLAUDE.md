@@ -5,8 +5,9 @@ should be minimal, clear, and elegant. Common games should still play.
 
 - Scope: NTSC NES: 6502 CPU, PPU, controller, mapper 0.
   No audio, no cycle accuracy, no PAL (yet).
-- NTSC timing: 60 Hz, 262 scanlines, 3 PPU dots per CPU cycle. These
-  constants live in one place (`NES`) so PAL can be added later.
+- NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle. These constants live
+  in one place (`NES`) so PAL can be added later. The window shows one frame
+  per screen refresh (vsync), so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window via the `sdl2` package).
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that

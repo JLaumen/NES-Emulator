@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), framesPerSecond, frames, nestest) where
+module NES (Cartridge, parseCartridge, Button (..), frames, nestest) where
 
 import Bus (Bus)
 import Bus qualified
@@ -20,8 +20,7 @@ import PPU qualified
 
 -- * NTSC timing
 
-framesPerSecond, scanlines, dotsPerLine, dotsPerCycle :: Int
-framesPerSecond = 60
+scanlines, dotsPerLine, dotsPerCycle :: Int
 scanlines = 262
 dotsPerLine = 341
 dotsPerCycle = 3

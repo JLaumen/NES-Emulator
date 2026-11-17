@@ -8,7 +8,7 @@ Each step ends with something we can check.
 3. [x] **PPU background**: registers $2000–$2007, VRAM with mirroring,
    per-scanline background rendering into a framebuffer, vblank NMI.
    Check: a game's title screen is visible.
-4. [x] **Window**: show frames at 60 Hz in `app/`.
+4. [x] **Window**: show frames in `app/`, one per screen refresh (vsync).
 5. [x] **Sprites**: OAM, OAM DMA ($4014), sprite-0 hit.
 6. [x] **Controller**: $4016 reads from the keyboard. Check: games play.
 

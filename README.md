@@ -21,6 +21,9 @@ package sdl2
 
 Keys: arrows, X (A), Z (B), Enter (Start), right Shift (Select).
 
+The game runs at your display's refresh rate, so it needs a 60 Hz display
+to run at the right speed.
+
 The CPU passes nestest's official-opcode tests
 (`cabal run nes -- --nestest nestest.nes` prints a trace).
 
