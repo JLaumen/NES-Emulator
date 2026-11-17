@@ -7,7 +7,7 @@ should be minimal, clear, and elegant. Common games should still play.
   No audio, no cycle accuracy, no PAL (yet).
 - NTSC timing: 60 Hz, 262 scanlines, 3 PPU dots per CPU cycle. These
   constants live in one place (`NES`) so PAL can be added later.
-- Pure core in `src/`, IO in `app/`.
+- Pure core in `src/`, IO in `app/` (an SDL2 window via the `sdl2` package).
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
   doesn't.
