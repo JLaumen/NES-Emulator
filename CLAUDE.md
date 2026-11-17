@@ -17,8 +17,9 @@ should be minimal, clear, and elegant. Common games should still play.
 - Modules: `Cartridge` (iNES parsing), `Bus` (CPU memory map), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
   NOPs), `PPU` (registers, VRAM, OAM; renders background and
-  sprites a scanline at a time), `NES` (public API:
-  a lazy list of frames, run scanline by scanline).
+  sprites a scanline at a time), `Controller` ($4016), `NES` (public API:
+  a lazy list of frames from a lazy list of buttons held, run scanline by
+  scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
   `sed -E 's/^(....).*(A:.. X:.. Y:.. P:.. SP:..).*(CYC:[0-9]+)\r?$/\1 \2 \3/' nestest.log > expected.txt`

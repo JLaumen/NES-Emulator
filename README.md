@@ -19,8 +19,9 @@ package sdl2
   extra-include-dirs: /usr/include/SDL2
 ```
 
-Status: the CPU passes nestest's official-opcode tests
-(`cabal run nes -- --nestest nestest.nes` prints a trace) and the PPU draws
-backgrounds and sprites in a window; input is next.
+Keys: arrows, X (A), Z (B), Enter (Start), right Shift (Select).
+
+The CPU passes nestest's official-opcode tests
+(`cabal run nes -- --nestest nestest.nes` prints a trace).
 
 MIT licensed.
