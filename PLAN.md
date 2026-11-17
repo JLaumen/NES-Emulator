@@ -14,7 +14,7 @@ Each step ends with something we can check.
 7. [x] **APU**: pulse ×2, triangle, noise and DMC channels, frame counter,
    IRQs, mixer; samples at 44.1 kHz with each frame. Check: SMB's music
    rendered to a WAV file sounds right.
-8. [ ] **Sound**: play the samples through SDL; keep the audio buffer level
+8. [x] **Sound**: play the samples through SDL; keep the audio buffer level
    by nudging the playback rate (vsync paces the game). Check: games sound
    right without crackles.
 

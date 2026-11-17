@@ -9,7 +9,9 @@ should be minimal, clear, and elegant. Common games should still play.
   These constants live in one place (`NES`; the APU's tables are NTSC too)
   so PAL can be added later. The window shows one frame per screen refresh
   (vsync), so 60 Hz comes from the display.
-- Pure core in `src/`, IO in `app/` (an SDL2 window via the `sdl2` package).
+- Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
+  `sdl2` package; the sound plays up to 0.5% faster or slower to keep its
+  queue level, since vsync paces the game).
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
   doesn't.

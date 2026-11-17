@@ -48,7 +48,11 @@ executable nes
   import: shared
   hs-source-dirs: app
   main-is: Main.hs
+  -- SDL calls the audio callback from its own thread.
+  ghc-options: -threaded
   build-depends:
     bytestring,
+    containers ^>=0.8,
     nes,
     sdl2 ^>=2.5.6,
+    vector ^>=0.13.2,
