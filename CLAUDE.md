@@ -8,9 +8,9 @@ should be minimal, clear, and elegant. Common games should still play.
 - NTSC timing: 60 Hz, 262 scanlines, 3 PPU dots per CPU cycle. Keep these
   constants in one place so PAL can be added later.
 - Pure core in `src/`, IO in `app/`.
-- Warnings are errors. Use any GHC language feature or library bundled with
-  GHC (`base`, `array`, `bytestring`, `containers`, ...) when it improves the
-  code; keep anything beyond that to a minimum.
+- Warnings are errors. Use any GHC language feature or package, bundled or
+  external, when it improves the quality of the code; don't add one that
+  doesn't.
 - Core state lives in `ST` (mutable unboxed arrays for memory); the core's
   API stays pure via `runST`. Records use `OverloadedRecordDot` with
   `NoFieldSelectors`.
@@ -28,5 +28,5 @@ should be minimal, clear, and elegant. Common games should still play.
 - Before committing: `ormolu -i $(git ls-files '*.hs')`, `cabal-gild --io=nes.cabal`,
   `hlint .`, and `cabal build` must all pass cleanly. CI
   (`.github/workflows/ci.yml`) checks the same; keep tool versions in sync.
-- Keep README.md (for users) and CLAUDE.md (for Claude) current with every
-  change.
+- Keep README.md (for users), CLAUDE.md (for Claude) and PLAN.md (where we
+  are, what's next) current with every change.
