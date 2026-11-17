@@ -1,0 +1,36 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: haskell-actions/run-ormolu@v21
+        with:
+          version: 0.9.0.0
+      - uses: tfausak/cabal-gild-setup-action@v2
+        with:
+          version: 1.8.4.2
+      - run: cabal-gild --mode check nes.cabal
+      - uses: haskell-actions/hlint-setup@v2
+        with:
+          version: '3.10'
+      - uses: haskell-actions/hlint-run@v2
+        with:
+          fail-on: suggestion
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: 9.14.1
+          cabal-version: 3.18.2.0
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: cabal-${{ steps.setup.outputs.ghc-version }}-${{ hashFiles('nes.cabal') }}
+      - run: cabal build

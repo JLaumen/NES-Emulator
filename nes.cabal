@@ -1,0 +1,40 @@
+cabal-version: 3.14
+name: nes
+version: 0.1.0.0
+synopsis: A small, simple NES emulator
+license: MIT
+license-file: LICENSE
+author: JLaumen
+build-type: Simple
+tested-with: ghc ==9.14.1
+extra-doc-files: README.md
+
+common shared
+  default-language: GHC2024
+  ghc-options:
+    -O2
+    -Werror
+    -Wall
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wpartial-fields
+    -Wredundant-constraints
+    -Wredundant-bang-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wunused-packages
+    -Woperator-whitespace
+
+  build-depends: base ^>=4.22
+
+library
+  import: shared
+  hs-source-dirs: src
+  exposed-modules: NES
+
+executable nes
+  import: shared
+  hs-source-dirs: app
+  main-is: Main.hs
+  build-depends: nes
