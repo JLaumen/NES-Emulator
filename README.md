@@ -9,4 +9,8 @@ perfect accuracy and supports NTSC mapper 0 games without sound.
 cabal run nes -- game.nes
 ```
 
+Status: the CPU passes nestest's official-opcode tests
+(`cabal run nes -- --nestest nestest.nes` prints a trace); graphics and
+input are next.
+
 MIT licensed.

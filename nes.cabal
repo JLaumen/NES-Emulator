@@ -32,9 +32,19 @@ library
   import: shared
   hs-source-dirs: src
   exposed-modules: NES
+  other-modules:
+    Bus
+    Cartridge
+    CPU
+
+  build-depends:
+    array ^>=0.5.8,
+    bytestring ^>=0.12.2,
 
 executable nes
   import: shared
   hs-source-dirs: app
   main-is: Main.hs
-  build-depends: nes
+  build-depends:
+    bytestring,
+    nes,
