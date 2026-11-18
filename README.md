@@ -30,7 +30,7 @@ The sound card keeps the game at the right speed. With `--vsync`, the
 display does instead, one frame per refresh: smoother, but only the right
 speed on a 60 Hz display.
 
-With `--pause`, P pauses and resumes the game.
+With `--pause`, Escape pauses and resumes the game.
 
 The options combine, as in `cabal run nes -- --debug --vsync game.nes`.
 

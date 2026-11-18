@@ -42,8 +42,8 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- With vsync on, the screen paces the game instead: one frame per refresh,
 -- smoother but only the right speed on a 60 Hz display. With debug on, the
 -- visuals of what the emulator is doing go beside the game. (In a window
--- of their own, they would upset the vsync.) With pause on, P pauses and
--- resumes the game.
+-- of their own, they would upset the vsync.) With pause on, Escape pauses
+-- and resumes the game.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -83,7 +83,7 @@ play options cart = do
       loop paused outputs = do
         unless (options.vsync || paused) (drain queue)
         events <- map SDL.eventPayload <$> SDL.pollEvents
-        let paused' = paused /= (options.pause && odd (length (filter (pressed SDL.ScancodeP) events)))
+        let paused' = paused /= (options.pause && odd (length (filter (pressed SDL.ScancodeEscape) events)))
         unless (SDL.QuitEvent `elem` events) $
           -- Paused, the last frame stays on screen and the sound runs dry.
           if paused'

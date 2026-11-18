@@ -33,7 +33,7 @@ filtering out aliasing.
 Next, enhancements: not faithful to the console, but nicer to play. Each
 is off unless its command-line option turns it on.
 
-- [x] **Pause**: `--pause`; P pauses and resumes.
+- [x] **Pause**: `--pause`; Escape pauses and resumes.
 - **In `app/`**: fast-forward (no pacing, every few frames drawn);
   turbo buttons; gamepads (SDL's GameController); fullscreen and integer
   scaling; screenshots; cropping the 8 overscan rows top and bottom.

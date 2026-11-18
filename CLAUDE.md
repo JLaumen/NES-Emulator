@@ -17,7 +17,8 @@ command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
   refresh instead, so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
   `sdl2` package; with `--vsync`, the sound plays up to 0.5% faster or
-  slower to keep its queue level; with `--pause`, P pauses and resumes).
+  slower to keep its queue level; with `--pause`, Escape pauses and
+  resumes).
   `--debug` puts the visuals beside the game in the same window: a second
   window breaks vsync on GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or
