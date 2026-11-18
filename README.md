@@ -43,6 +43,10 @@ are a little wider than tall (8:7), as on a TV. With `--smooth`, the
 picture scales smoothly, so its pixels look even at any size, without
 blurring.
 
+With `--ghost`, each frame is blended with the one before, like an old
+TV's afterglow: sprites that games draw only every other frame show
+steady and see-through, as they did on a TV, instead of flickering.
+
 With `--palette file.pal`, the game shows its colours as that palette
 has them. The NES makes a TV signal, not RGB, so no one palette is right;
 `PALs/` holds well-known ones, from FCEUX's collection, as in

@@ -6,7 +6,8 @@ Simplest means the implementation, not the features: enhancements that
 make games nicer to play (pause, save states, no sprite flicker, …) are
 welcome, even when the console couldn't do them. Each is off unless its
 command-line option turns it on, like `--debug`, `--vsync`, `--pause`,
-`--crt`, `--no-flicker`, `--fullscreen`, `--wide`, `--smooth` and `--palette`.
+`--crt`, `--no-flicker`, `--fullscreen`, `--wide`, `--smooth`, `--ghost`
+and `--palette`.
 
 - Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0, plus
   enhancements (see PLAN.md).
@@ -25,7 +26,8 @@ command-line option turns it on, like `--debug`, `--vsync`, `--pause`,
   with `--no-flicker`, the PPU draws up to 64 sprites a scanline, not 8;
   `--fullscreen` fills the screen; `--wide` makes pixels 8:7; with
   `--smooth`, the 3× picture is scaled to the window linearly, not by
-  nearest pixel: sharp bilinear; `--palette file.pal` replaces the
+  nearest pixel: sharp bilinear; with `--ghost`, each frame is blended
+  half and half with the one before, like a CRT's afterglow; `--palette file.pal` replaces the
   built-in RGB of the 64 colours, and `PALs/` holds standard `.pal` files
   from FCEUX's collection).
   `--debug` puts the visuals beside the game in the same window: a second

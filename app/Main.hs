@@ -43,12 +43,13 @@ main = do
                   fullscreen = on "--fullscreen",
                   wide = on "--wide",
                   smooth = on "--smooth",
+                  ghost = on "--ghost",
                   palette
                 }
     _ -> die ("usage: nes " ++ unwords ["[" ++ flag ++ "]" | flag <- flags] ++ " [--palette <file.pal>] <rom.nes> | nes --nestest <rom.nes>")
 
 flags :: [String]
-flags = ["--debug", "--vsync", "--pause", "--crt", "--no-flicker", "--fullscreen", "--wide", "--smooth"]
+flags = ["--debug", "--vsync", "--pause", "--crt", "--no-flicker", "--fullscreen", "--wide", "--smooth", "--ghost"]
 
 -- | The value of the option given as @name value@, if any, and the other
 -- arguments.
@@ -57,7 +58,7 @@ valued name (option : value : rest) | option == name = (Just value, rest)
 valued name (arg : rest) = (arg :) <$> valued name rest
 valued _ [] = (Nothing, [])
 
-data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth :: Bool, palette :: Palette}
+data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth, ghost :: Bool, palette :: Palette}
 
 load :: (BS.ByteString -> Either String a) -> FilePath -> IO a
 load parse file = BS.readFile file >>= either (die . (("nes: " ++ file ++ ": ") ++)) pure . parse
@@ -76,8 +77,10 @@ load parse file = BS.readFile file >>= either (die . (("nes: " ++ file ++ ": ") 
 -- needn't take turns drawing them. With fullscreen on, the window fills
 -- the screen. With wide on, the NES's pixels are wider than tall, 8:7, as
 -- on a TV. With smooth on, the picture is scaled smoothly from three times
--- the NES's resolution, so its pixels look even at any size. The palette
--- gives the RGB of the NES's colours.
+-- the NES's resolution, so its pixels look even at any size. With ghost
+-- on, each frame shows blended half and half with the one before, like a
+-- CRT's afterglow, so sprites drawn on alternate frames show steady and
+-- see-through. The palette gives the RGB of the NES's colours.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -115,6 +118,10 @@ play options cart = do
   SDL.rendererLogicalSize renderer SDL.$= Just (fromIntegral <$> size)
   SDL.rendererDrawBlendMode renderer SDL.$= SDL.BlendAlphaBlend
   texture <- SDL.createTexture renderer SDL.RGB24 SDL.TextureAccessStreaming (SDL.V2 256 240)
+  -- The frame before, laid half see-through over the picture, with ghost on.
+  previous <- SDL.createTexture renderer SDL.RGB888 SDL.TextureAccessTarget (SDL.V2 256 240)
+  SDL.textureBlendMode previous SDL.$= SDL.BlendAlphaBlend
+  SDL.textureAlphaMod previous SDL.$= 128
   -- The picture at three times the NES's resolution, with the CRT's gaps,
   -- before it's scaled to the window: smoothly, it blends only where its
   -- big pixels meet, so they stay sharp.
@@ -127,6 +134,7 @@ play options cart = do
   let draw = do
         SDL.rendererRenderTarget renderer SDL.$= Just screen
         SDL.copy renderer texture Nothing Nothing
+        when options.ghost (SDL.copy renderer previous Nothing Nothing)
         when options.crt $ do
           SDL.rendererDrawColor renderer SDL.$= SDL.V4 0 0 0 128
           SDL.fillRects renderer gaps
@@ -160,6 +168,11 @@ play options cart = do
         case outputs of
           out : rest -> do
             atomicModifyIORef' queue (\q -> (q <> Seq.fromList out.sound, ()))
+            -- Keep the frame before, as this one replaces it.
+            when options.ghost $ do
+              SDL.rendererRenderTarget renderer SDL.$= Just previous
+              SDL.copy renderer texture Nothing Nothing
+              SDL.rendererRenderTarget renderer SDL.$= Nothing
             _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
             when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
             run (count - 1) buttons rest

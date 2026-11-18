@@ -41,6 +41,9 @@ Each step ends with something we can check.
     bilinear), so pixels look even at any size without blurring.
 17. [x] **Palettes**: `--palette file.pal` shows the colours as a `.pal`
     file has them; `PALs/` holds standard ones.
+18. [x] **Afterglow**: `--ghost` blends each frame half and half with the
+    last, so sprites flickered on alternate frames show steady and
+    see-through, as on a TV.
 
 ## Next
 
@@ -53,9 +56,7 @@ play; each is off unless its command-line option turns it on.
   held, for recordings and streams.
 - **Picture**: integer scaling; screenshots (SDL saves BMPs); cropping the
   8 overscan rows top and bottom; colour emphasis (with 512-colour
-  `.pal` files); `--ghost`, blending each frame with the last, like a
-  CRT's afterglow (games that flicker sprites on alternate frames then
-  show them steady and see-through, as on a TV); a shadow mask for
+  `.pal` files); a shadow mask for
   `--crt`, tinting the three columns of each 3× pixel red, green and blue;
   Scale3x (AdvMAME3x), which rounds diagonals from each pixel's four
   neighbours and fits the 3× picture exactly; NTSC composite colour
