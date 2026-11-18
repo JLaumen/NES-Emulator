@@ -13,9 +13,8 @@ import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Tuple (swap)
 import Data.Vector.Storable.Mutable qualified as MV
-import Data.Vector.Unboxed qualified as V
 import Foreign (nullPtr, peek, with)
-import NES (Button, Cartridge, Frame, frameRate, frames, nestest, parseCartridge, sampleRate, visualsSize)
+import NES (Button, Cartridge, Frame, Input (..), frameRate, frames, nestest, parseCartridge, sampleRate, visualsSize)
 import NES qualified
 import SDL qualified
 import SDL.Internal.Types (Window (..))
@@ -103,12 +102,11 @@ play options cart = do
       run :: Int -> [Button] -> [Frame] -> IO (Maybe [Frame])
       run 0 _ outputs = pure (Just outputs)
       run count buttons outputs = do
-        writeChan inputs buttons
+        queued <- Seq.length <$> readIORef queue
+        writeChan inputs Input {buttons, speed = if options.vsync then speed queued else 1}
         case outputs of
           out : rest -> do
-            queued <- Seq.length <$> readIORef queue
-            let sound = Seq.fromList (if options.vsync then resample (speed queued) out.sound else out.sound)
-            atomicModifyIORef' queue (\q -> (q <> sound, ()))
+            atomicModifyIORef' queue (\q -> (q <> Seq.fromList out.sound, ()))
             _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
             when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
             run (count - 1) buttons rest
@@ -149,21 +147,11 @@ refreshRate (Window window) = do
     pure (if hz > 0 then fromIntegral hz else 60)
 
 -- | With vsync, the display and the sound card keep slightly different
--- time, so the sound plays up to 0.5% faster or slower to keep the queue
+-- time, so the console runs up to 0.5% faster or slower relative to the
+-- sound card (its picture keeps pace with the display) to keep the queue
 -- near its target.
 speed :: Int -> Double
 speed queued = 1 + 0.005 * max (-1) (min 1 (fromIntegral (queued - target) / 1024))
-
--- | Play samples at the given speed, interpolating between them.
-resample :: Double -> [Float] -> [Float]
-resample rate samples =
-  [ realToFrac (1 - f) * at i + realToFrac f * at (i + 1)
-  | t <- takeWhile (< fromIntegral (V.length v)) [rate * fromIntegral k | k <- [0 :: Int ..]],
-    let (i, f) = properFraction t
-  ]
-  where
-    v = V.fromList samples
-    at i = v V.! min i (V.length v - 1)
 
 -- | Fill the audio device's buffer from the queue, with silence if the
 -- queue runs dry.

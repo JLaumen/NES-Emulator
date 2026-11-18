@@ -27,21 +27,26 @@ Each step ends with something we can check.
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
 are never hidden; only controller 1 is connected; the DMC doesn't steal
-CPU cycles; the APU catches up once a scanline and samples without
-filtering out aliasing.
+CPU cycles; the APU catches up once a scanline; averaging each sample
+(a box filter) leaves some aliasing, and noise isn't averaged.
 
 Next, enhancements: not faithful to the console, but nicer to play. Each
 is off unless its command-line option turns it on.
 
 - [x] **Pause**: `--pause`; Escape pauses and resumes.
 - [x] **Any refresh rate**: `--vsync` runs the frames due each refresh, so
-  the game keeps its speed at 120 or 144 Hz too.
+  the game keeps its speed at 120 or 144 Hz too. The console's speed is
+  an input, so the APU makes exactly the sound needed, unresampled.
+- [x] **Less aliasing**: each sample averages the mix over its cycles,
+  instead of taking the level at one moment (10 dB less on a 5.3 kHz
+  pulse).
+- [ ] **Frame delay**: `--frame-delay`; with `--vsync`, wait after each
+  refresh, then read the buttons and run the frame just in time.
 - **In `app/`**: fast-forward (no pacing, every few frames drawn);
   turbo buttons; gamepads (SDL's GameController); fullscreen and integer
   scaling; screenshots; cropping the 8 overscan rows top and bottom.
 - **In the core**: an option to lift the 8-sprites-a-scanline limit (no
-  flicker); a choice of palettes; a low-pass filter against harsh,
-  aliased sound; muting single sound channels.
+  flicker); a choice of palettes; muting single sound channels.
 - **Bigger**: save states (freeze the state into a value, thaw it to
   resume), which needs an API to step and resume a machine, not just a
   list of frames; then rewind, from a ring of recent states; battery saves

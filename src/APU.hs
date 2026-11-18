@@ -4,7 +4,7 @@
 -- | The audio processing unit: two pulse waves, a triangle wave, noise, and
 -- delta-modulated samples (the DMC), mixed into output samples. A pure
 -- state machine, run a few CPU cycles at a time.
-module APU (APU, new, write, readStatus, run, irq, drain) where
+module APU (APU, new, atSpeed, write, readStatus, run, irq, drain) where
 
 import Cartridge (Cartridge, prgByte)
 import Data.Bits (shiftL, shiftR, testBit, xor, (.&.), (.|.))
@@ -20,11 +20,16 @@ data APU = APU
     frameCycle :: !Int,
     -- | The CPU cycle the APU has run up to.
     cycle :: !Int,
-    cyclesPerSample, untilSample :: !Double,
+    -- | Cycles per sample at the console's own speed, the speed it runs at
+    -- (see 'atSpeed'), and the cycles until the next sample.
+    cyclesPerSample, speed, untilSample :: !Double,
+    -- | The mixed output summed over the cycles since the last sample.
+    area :: !Float,
     -- | A high-pass filter, as in the console, takes out the DC offset.
     filterGain, lastIn, lastOut :: !Float,
-    -- | The channels' levels at each sample since the last 'drain', newest
-    -- first.
+    -- | The samples since the last 'drain', and the channels' levels at
+    -- each, newest first.
+    samples :: [Float],
     voices :: [[Int]]
   }
 
@@ -111,10 +116,13 @@ new cpuRate sampleRate =
       frameCycle = 0,
       cycle = 0,
       cyclesPerSample = cpuRate / sampleRate,
+      speed = 1,
       untilSample = cpuRate / sampleRate,
+      area = 0,
       filterGain = realToFrac (rc / (rc + 1 / sampleRate)),
       lastIn = 0,
       lastOut = 0,
+      samples = [],
       voices = []
     }
   where
@@ -135,6 +143,12 @@ new cpuRate sampleRate =
           linearReload = False,
           mode = False
         }
+
+-- | Run at this multiple of the console's speed, relative to the sound
+-- card: above 1, the same cycles make fewer samples, which then play
+-- faster.
+atSpeed :: Double -> APU -> APU
+atSpeed speed apu = apu {speed}
 
 -- * Registers $4000–$4017
 
@@ -225,10 +239,9 @@ irq apu = apu.frameIrq || apu.dmc.irqFlag
 -- channels' levels at each (pulse 1, pulse 2, triangle and noise from 0 to
 -- 15, the DMC from 0 to 127).
 drain :: APU -> ([Float], [[Int]], APU)
-drain apu = (sound, voices, apu {voices = [], lastIn, lastOut})
+drain apu = (sound, reverse apu.voices, apu {samples = [], voices = [], lastIn, lastOut})
   where
-    voices = reverse apu.voices
-    ((lastIn, lastOut), sound) = mapAccumL highPass (apu.lastIn, apu.lastOut) (map mix voices)
+    ((lastIn, lastOut), sound) = mapAccumL highPass (apu.lastIn, apu.lastOut) (reverse apu.samples)
     highPass (i, o) x = let o' = apu.filterGain * (o + x - i) in ((x, o'), o')
 
 -- * Running
@@ -238,10 +251,11 @@ drain apu = (sound, voices, apu {voices = [], lastIn, lastOut})
 run :: Cartridge -> Int -> APU -> APU
 run cart target apu
   | n <= 0 = apu
-  | otherwise = run cart target (sampleIfDue (frameStep (advance cart k apu)))
+  | otherwise = run cart target (output k (mix (levels apu)) (frameStep (advance cart k apu)))
   where
     n = target - apu.cycle
-    k = minimum [n, nextStep apu - apu.frameCycle, ceiling apu.untilSample]
+    -- Only noise changes level within these k cycles.
+    k = minimum ([n, nextStep apu - apu.frameCycle, ceiling apu.untilSample] ++ changes apu)
 
 -- | The cycles at which the frame counter clocks the channels; at the
 -- last, it starts over.
@@ -329,8 +343,7 @@ advance cart n apu =
   apu
     { pulse1 = sequencer 8 (2 * (apu.pulse1.period + 1)) apu.pulse1,
       pulse2 = sequencer 8 (2 * (apu.pulse2.period + 1)) apu.pulse2,
-      -- The triangle pauses rather than play inaudibly high notes.
-      triangle = if t.length > 0 && t.linear > 0 && t.period >= 2 then sequencer 32 (t.period + 1) t else t,
+      triangle = if playing t then sequencer 32 (t.period + 1) t else t,
       noise =
         let (timer, ticks) = countDown apu.noise.period n apu.noise.timer
          in apu.noise {timer, step = iterate shiftNoise apu.noise.step !! ticks},
@@ -347,6 +360,19 @@ advance cart n apu =
       let (timer, ticks) = countDown cycles n c.timer
        in c {timer, step = (c.step + ticks) `mod` len}
     shiftNoise r = r `shiftR` 1 .|. ((r `xor` r `shiftR` (if apu.noise.mode then 6 else 1)) .&. 1) `shiftL` 14
+
+-- | The triangle pauses rather than play inaudibly high notes.
+playing :: Channel -> Bool
+playing t = t.length > 0 && t.linear > 0 && t.period >= 2
+
+-- | The cycles until each audible channel's timer next clocks it, which may
+-- change its level. Noise is left out: it can change every 4 cycles, which
+-- would cost a lot, and noise that folds back is still just noise.
+changes :: APU -> [Int]
+changes apu =
+  [c.timer | c <- [apu.pulse1, apu.pulse2], c.length > 0, not (muted c)]
+    ++ [apu.triangle.timer | playing apu.triangle]
+    ++ [apu.dmc.clock | not apu.dmc.silent]
 
 -- | Count a timer with the given period down by n cycles: the cycles left
 -- until it next expires, and how often it expired.
@@ -384,10 +410,24 @@ fetch cart d
 
 -- * Output
 
-sampleIfDue :: APU -> APU
-sampleIfDue apu
-  | apu.untilSample > 0 = apu
-  | otherwise = apu {voices = levels apu : apu.voices, untilSample = apu.untilSample + apu.cyclesPerSample}
+-- | Add the level over the last k cycles to the sample being made, and
+-- finish the sample when it's due. Each sample is the average level over
+-- its cycles, not the level at one moment, so notes too high for the
+-- sample rate don't fold back as false, harsh tones (aliasing).
+output :: Int -> Float -> APU -> APU
+output k level apu
+  | apu.untilSample > 0 = apu {area = apu.area + level * fromIntegral k}
+  | otherwise =
+      apu
+        { samples = (apu.area + level * (fromIntegral k - over)) / realToFrac period : apu.samples,
+          voices = levels apu : apu.voices,
+          area = level * over,
+          untilSample = apu.untilSample + period
+        }
+  where
+    -- The cycles past the sample's end, which count towards the next.
+    over = realToFrac (negate apu.untilSample)
+    period = apu.cyclesPerSample * apu.speed
 
 -- | The channels' levels combined, the console's non-linear way.
 mix :: [Int] -> Float

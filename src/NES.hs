@@ -2,7 +2,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), Frame (..), frameRate, sampleRate, visualsSize, frames, nestest) where
+module NES (Cartridge, parseCartridge, Button (..), Input (..), Frame (..), frameRate, sampleRate, visualsSize, frames, nestest) where
 
 import APU qualified
 import Bus (Bus)
@@ -60,15 +60,21 @@ data Frame = Frame
 visualsSize :: (Int, Int)
 visualsSize = (Visualise.width, Visualise.height)
 
--- | The frames a game shows, given the buttons held during each. Each
--- frame's buttons are needed only once that frame is.
-frames :: Cartridge -> [[Button]] -> [Frame]
+-- | What drives a frame: the buttons held, and how fast the console runs
+-- relative to the sound card (1 is its own speed; above 1, the frame makes
+-- less sound, which then plays faster).
+data Input = Input {buttons :: [Button], speed :: Double}
+
+-- | The frames a game shows, given the input for each. Each frame's input
+-- is needed only once that frame is.
+frames :: Cartridge -> [Input] -> [Frame]
 frames cart inputs = Lazy.runST $ do
   (bus, cpu) <- strictToLazyST (boot cart)
   let run _ [] = pure []
-      run state (buttons : rest) = do
+      run state (input : rest) = do
         (state', out) <- strictToLazyST $ do
-          Controller.press bus.controller buttons
+          Controller.press bus.controller input.buttons
+          modifySTRef' bus.apu (APU.atSpeed input.speed)
           state' <- frame bus state
           picture <- PPU.picture bus.ppu
           (sound, voices, apu) <- APU.drain <$> readSTRef bus.apu

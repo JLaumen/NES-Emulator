@@ -17,9 +17,9 @@ command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
   refresh instead: each refresh runs the frames due, one every k refreshes
   at about k × 60.1 Hz, else at the NES's rate (`frameRate`).
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
-  `sdl2` package; with `--vsync`, the sound plays up to 0.5% faster or
-  slower to keep its queue level; with `--pause`, Escape pauses and
-  resumes).
+  `sdl2` package; with `--vsync`, the console runs up to 0.5% faster or
+  slower against the sound card to keep the sound queue level; with
+  `--pause`, Escape pauses and resumes).
   `--debug` puts the visuals beside the game in the same window: a second
   window breaks vsync on GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or
@@ -32,10 +32,13 @@ command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
   NOPs), `PPU` (registers, VRAM, OAM; renders background and
   sprites a scanline at a time), `APU` (a pure state machine in an `STRef`,
-  caught up once a scanline; samples at 44.1 kHz), `Controller` ($4016),
+  caught up once a scanline; each 44.1 kHz sample averages the mix over
+  its cycles, against aliasing; noise isn't averaged, to save time),
+  `Controller` ($4016),
   `Visualise` (draws a snapshot of the PPU, APU and CPU into one picture),
   `NES` (public API: a lazy list of frames, each a picture, its sound and
-  its visuals, drawn only when used, from a lazy list of buttons held, run
+  its visuals, drawn only when used, from a lazy list of inputs (the
+  buttons held and the console's speed against the sound card), run
   scanline by scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
