@@ -14,7 +14,8 @@ command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
   These constants live in one place (`NES`; the APU's tables are NTSC too)
   so PAL can be added later. The sound card paces the game: each frame
   waits for the sound queue to run low. `--vsync` paces it by the screen
-  refresh instead, so 60 Hz comes from the display.
+  refresh instead: each refresh runs the frames due, one every k refreshes
+  at about k × 60.1 Hz, else at the NES's rate (`frameRate`).
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
   `sdl2` package; with `--vsync`, the sound plays up to 0.5% faster or
   slower to keep its queue level; with `--pause`, Escape pauses and

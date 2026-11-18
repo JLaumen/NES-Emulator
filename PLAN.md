@@ -34,6 +34,8 @@ Next, enhancements: not faithful to the console, but nicer to play. Each
 is off unless its command-line option turns it on.
 
 - [x] **Pause**: `--pause`; Escape pauses and resumes.
+- [x] **Any refresh rate**: `--vsync` runs the frames due each refresh, so
+  the game keeps its speed at 120 or 144 Hz too.
 - **In `app/`**: fast-forward (no pacing, every few frames drawn);
   turbo buttons; gamepads (SDL's GameController); fullscreen and integer
   scaling; screenshots; cropping the 8 overscan rows top and bottom.

@@ -14,9 +14,12 @@ import Data.Sequence qualified as Seq
 import Data.Tuple (swap)
 import Data.Vector.Storable.Mutable qualified as MV
 import Data.Vector.Unboxed qualified as V
-import NES (Button, Cartridge, frames, nestest, parseCartridge, sampleRate, visualsSize)
+import Foreign (nullPtr, peek, with)
+import NES (Button, Cartridge, Frame, frameRate, frames, nestest, parseCartridge, sampleRate, visualsSize)
 import NES qualified
 import SDL qualified
+import SDL.Internal.Types (Window (..))
+import SDL.Raw qualified as Raw
 import System.Environment (getArgs)
 import System.Exit (die)
 
@@ -39,8 +42,9 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- | Play the game in a window, at three times the NES's resolution. The
 -- sound goes through a queue that the audio device empties at its own
 -- pace, and that queue paces the game: each frame waits for it to run low.
--- With vsync on, the screen paces the game instead: one frame per refresh,
--- smoother but only the right speed on a 60 Hz display. With debug on, the
+-- With vsync on, the screen paces the game instead: each refresh runs the
+-- frames due by then, so the game keeps its speed at any refresh rate and
+-- is smoothest at 60 or 120 Hz. With debug on, the
 -- visuals of what the emulator is doing go beside the game. (In a window
 -- of their own, they would upset the vsync.) With pause on, Escape pauses
 -- and resumes the game.
@@ -80,28 +84,36 @@ play options cart = do
         SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
         when options.debug (SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside)))
         SDL.present renderer -- with vsync, waits for the refresh
-      loop paused outputs = do
+      loop paused owed outputs = do
         unless (options.vsync || paused) (drain queue)
         events <- map SDL.eventPayload <$> SDL.pollEvents
         let paused' = paused /= (options.pause && odd (length (filter (pressed SDL.ScancodeEscape) events)))
         unless (SDL.QuitEvent `elem` events) $
           -- Paused, the last frame stays on screen and the sound runs dry.
           if paused'
-            then draw >> unless options.vsync (SDL.delay 16) >> loop True outputs
+            then draw >> unless options.vsync (SDL.delay 16) >> loop True owed outputs
             else do
               held <- SDL.getKeyboardState
-              writeChan inputs [button | (key, button) <- keys, held key]
-              case outputs of
-                out : rest -> do
-                  queued <- Seq.length <$> readIORef queue
-                  let sound = Seq.fromList (if options.vsync then resample (speed queued) out.sound else out.sound)
-                  atomicModifyIORef' queue (\q -> (q <> sound, ()))
-                  _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
-                  when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
-                  draw
-                  loop False rest
-                [] -> pure ()
-  loop False . frames cart =<< getChanContents inputs
+              -- Without vsync, one frame; with it, as many as are due.
+              due <- if options.vsync then (owed +) . perRefresh <$> refreshRate window else pure 1
+              let count = floor due
+              run count [button | (key, button) <- keys, held key] outputs >>= \case
+                Just rest -> draw >> loop False (due - fromIntegral count) rest
+                Nothing -> pure ()
+      run :: Int -> [Button] -> [Frame] -> IO (Maybe [Frame])
+      run 0 _ outputs = pure (Just outputs)
+      run count buttons outputs = do
+        writeChan inputs buttons
+        case outputs of
+          out : rest -> do
+            queued <- Seq.length <$> readIORef queue
+            let sound = Seq.fromList (if options.vsync then resample (speed queued) out.sound else out.sound)
+            atomicModifyIORef' queue (\q -> (q <> sound, ()))
+            _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
+            when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
+            run (count - 1) buttons rest
+          [] -> pure Nothing
+  loop False 0 . frames cart =<< getChanContents inputs
   SDL.closeAudioDevice device
   SDL.quit
 
@@ -114,6 +126,27 @@ drain :: IORef (Seq Float) -> IO ()
 drain queue = do
   queued <- Seq.length <$> readIORef queue
   when (queued >= target) (SDL.delay 1 >> drain queue)
+
+-- | With vsync, game frames per screen refresh. At about k times the NES's
+-- frame rate, one every k refreshes, so every frame shows equally long and
+-- the sound's speed takes up the difference. Otherwise, the NES's rate, and
+-- some frames show for a refresh longer than others.
+perRefresh :: Double -> Double
+perRefresh hz
+  | abs (hz / k / frameRate - 1) < 0.003 = 1 / k
+  | otherwise = frameRate / hz
+  where
+    k = max 1 (fromIntegral (round (hz / frameRate) :: Int))
+
+-- | The refresh rate of the screen the window is on, assumed 60 Hz if SDL
+-- doesn't know it.
+refreshRate :: SDL.Window -> IO Double
+refreshRate (Window window) = do
+  display <- Raw.getWindowDisplayIndex window
+  with (Raw.DisplayMode 0 0 0 0 nullPtr) $ \mode -> do
+    _ <- Raw.getCurrentDisplayMode display mode
+    hz <- Raw.displayModeRefreshRate <$> peek mode
+    pure (if hz > 0 then fromIntegral hz else 60)
 
 -- | With vsync, the display and the sound card keep slightly different
 -- time, so the sound plays up to 0.5% faster or slower to keep the queue

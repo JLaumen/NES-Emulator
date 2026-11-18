@@ -27,8 +27,8 @@ pattern tables, palettes and sprites, each sound channel as an
 oscilloscope, and the CPU's registers and memory reads and writes.
 
 The sound card keeps the game at the right speed. With `--vsync`, the
-display does instead, one frame per refresh: smoother, but only the right
-speed on a 60 Hz display.
+display does instead, in step with its refreshes: perfectly smooth on a
+60 or 120 Hz display, and the right speed on any other.
 
 With `--pause`, Escape pauses and resumes the game.
 

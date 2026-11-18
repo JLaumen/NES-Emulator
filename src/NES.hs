@@ -2,7 +2,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), Frame (..), sampleRate, visualsSize, frames, nestest) where
+module NES (Cartridge, parseCartridge, Button (..), Frame (..), frameRate, sampleRate, visualsSize, frames, nestest) where
 
 import APU qualified
 import Bus (Bus)
@@ -33,6 +33,10 @@ dotsPerCycle = 3
 -- | The CPU's clock rate in Hz.
 cpuRate :: Double
 cpuRate = 1789773
+
+-- | Frames per second.
+frameRate :: Double
+frameRate = cpuRate * fromIntegral dotsPerCycle / fromIntegral (scanlines * dotsPerLine)
 
 -- | Sound samples per second.
 sampleRate :: Int
