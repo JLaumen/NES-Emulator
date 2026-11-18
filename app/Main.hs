@@ -5,7 +5,7 @@
 module Main (main) where
 
 import Control.Concurrent (getChanContents, newChan, writeChan)
-import Control.Monad (unless, when)
+import Control.Monad (unless, void, when)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (partition)
@@ -26,11 +26,12 @@ main = do
   case args of
     ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
     _
-      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync"]) args ->
-          load rom >>= play Options {debug = "--debug" `elem` flags, vsync = "--vsync" `elem` flags}
-    _ -> die "usage: nes [--debug] [--vsync] <rom.nes> | nes --nestest <rom.nes>"
+      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause"]) args,
+        let on flag = flag `elem` flags ->
+          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause"}
+    _ -> die "usage: nes [--debug] [--vsync] [--pause] <rom.nes> | nes --nestest <rom.nes>"
 
-data Options = Options {debug :: Bool, vsync :: Bool}
+data Options = Options {debug, vsync, pause :: Bool}
 
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
@@ -41,7 +42,8 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- With vsync on, the screen paces the game instead: one frame per refresh,
 -- smoother but only the right speed on a 60 Hz display. With debug on, the
 -- visuals of what the emulator is doing go beside the game. (In a window
--- of their own, they would upset the vsync.)
+-- of their own, they would upset the vsync.) With pause on, P pauses and
+-- resumes the game.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -73,26 +75,33 @@ play options cart = do
   -- The core reads the buttons for each frame lazily from this channel, so
   -- they must be in it before the frame is drawn.
   inputs <- newChan
-  let loop outputs = do
-        unless options.vsync (drain queue)
-        events <- SDL.pollEvents
-        held <- SDL.getKeyboardState
-        writeChan inputs [button | (key, button) <- keys, held key]
-        unless (any ((== SDL.QuitEvent) . SDL.eventPayload) events) $ case outputs of
-          out : rest -> do
-            queued <- Seq.length <$> readIORef queue
-            let sound = Seq.fromList (if options.vsync then resample (speed queued) out.sound else out.sound)
-            atomicModifyIORef' queue (\q -> (q <> sound, ()))
-            SDL.clear renderer
-            _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
-            SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
-            when options.debug $ do
-              _ <- SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)
-              SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside))
-            SDL.present renderer -- with vsync, waits for the refresh
-            loop rest
-          [] -> pure ()
-  loop . frames cart =<< getChanContents inputs
+  let draw = do
+        SDL.clear renderer
+        SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
+        when options.debug (SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside)))
+        SDL.present renderer -- with vsync, waits for the refresh
+      loop paused outputs = do
+        unless (options.vsync || paused) (drain queue)
+        events <- map SDL.eventPayload <$> SDL.pollEvents
+        let paused' = paused /= (options.pause && odd (length (filter (pressed SDL.ScancodeP) events)))
+        unless (SDL.QuitEvent `elem` events) $
+          -- Paused, the last frame stays on screen and the sound runs dry.
+          if paused'
+            then draw >> unless options.vsync (SDL.delay 16) >> loop True outputs
+            else do
+              held <- SDL.getKeyboardState
+              writeChan inputs [button | (key, button) <- keys, held key]
+              case outputs of
+                out : rest -> do
+                  queued <- Seq.length <$> readIORef queue
+                  let sound = Seq.fromList (if options.vsync then resample (speed queued) out.sound else out.sound)
+                  atomicModifyIORef' queue (\q -> (q <> sound, ()))
+                  _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
+                  when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
+                  draw
+                  loop False rest
+                [] -> pure ()
+  loop False . frames cart =<< getChanContents inputs
   SDL.closeAudioDevice device
   SDL.quit
 
@@ -131,6 +140,11 @@ speaker queue SDL.FloatingLEAudio buffer = do
   MV.set buffer 0
   sequence_ (Seq.mapWithIndex (MV.write buffer) samples)
 speaker _ _ _ = error "nes: the audio device ignored the requested format"
+
+-- | Whether this event is the key going down, not held and repeating.
+pressed :: SDL.Scancode -> SDL.EventPayload -> Bool
+pressed key (SDL.KeyboardEvent (SDL.KeyboardEventData _ SDL.Pressed False keysym)) = SDL.keysymScancode keysym == key
+pressed _ _ = False
 
 keys :: [(SDL.Scancode, Button)]
 keys =

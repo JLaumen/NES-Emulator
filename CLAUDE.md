@@ -4,7 +4,8 @@ Goal: the simplest NES emulator, not the most accurate. Code and docs alike
 should be minimal, clear, and elegant. Common games should still play.
 Simplest means the implementation, not the features: enhancements that
 make games nicer to play (pause, save states, no sprite flicker, …) are
-welcome, even when the console couldn't do them.
+welcome, even when the console couldn't do them. Each is off unless its
+command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
 
 - Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0, plus
   enhancements (see PLAN.md).
@@ -16,9 +17,9 @@ welcome, even when the console couldn't do them.
   refresh instead, so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
   `sdl2` package; with `--vsync`, the sound plays up to 0.5% faster or
-  slower to keep its queue level). `--debug` puts the visuals
-  beside the game in the same window: a second window breaks vsync on
-  GNOME Wayland.
+  slower to keep its queue level; with `--pause`, P pauses and resumes).
+  `--debug` puts the visuals beside the game in the same window: a second
+  window breaks vsync on GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
   doesn't.

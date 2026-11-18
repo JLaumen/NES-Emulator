@@ -30,9 +30,11 @@ are never hidden; only controller 1 is connected; the DMC doesn't steal
 CPU cycles; the APU catches up once a scanline and samples without
 filtering out aliasing.
 
-Next, enhancements: not faithful to the console, but nicer to play.
+Next, enhancements: not faithful to the console, but nicer to play. Each
+is off unless its command-line option turns it on.
 
-- **In `app/`**: pause; fast-forward (no pacing, every few frames drawn);
+- [x] **Pause**: `--pause`; P pauses and resumes.
+- **In `app/`**: fast-forward (no pacing, every few frames drawn);
   turbo buttons; gamepads (SDL's GameController); fullscreen and integer
   scaling; screenshots; cropping the 8 overscan rows top and bottom.
 - **In the core**: an option to lift the 8-sprites-a-scanline limit (no
