@@ -32,6 +32,9 @@ display does instead, in step with its refreshes: perfectly smooth on a
 
 With `--pause`, Escape pauses and resumes the game.
 
+With `--crt`, the picture has dark gaps between its rows, like an old TV's
+scanlines.
+
 The options combine, as in `cabal run nes -- --debug --vsync game.nes`.
 
 The CPU passes nestest's official-opcode tests

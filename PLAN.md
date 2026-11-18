@@ -31,6 +31,8 @@ Each step ends with something we can check.
 13. [x] **Less aliasing**: each sample averages the mix over its cycles,
     instead of taking the level at one moment (10 dB less on a 5.3 kHz
     pulse).
+14. [x] **CRT look**: `--crt` darkens the bottom of every three rows of
+    the 3× picture, as gaps between scanlines.
 
 ## Next
 
@@ -54,8 +56,8 @@ play; each is off unless its command-line option turns it on.
   window, the compositor composites about 8 ms before the refresh and
   misses some on its own, so it gained only 1–3 ms. Worth retrying in
   fullscreen or on X11.
-- **Maybe not**: CRT shaders and upscalers (darkening every other row at
-  3× gets most of the look); Game Genie codes.
+- **Maybe not**: CRT shaders and upscalers (`--crt`'s scanline gaps get
+  most of the look); Game Genie codes.
 
 Accuracy and coverage, when a game needs them: the known shortcuts below;
 band-limited sound synthesis (as blip_buf does), which would end the

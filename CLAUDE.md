@@ -5,7 +5,8 @@ should be minimal, clear, and elegant. Common games should still play.
 Simplest means the implementation, not the features: enhancements that
 make games nicer to play (pause, save states, no sprite flicker, …) are
 welcome, even when the console couldn't do them. Each is off unless its
-command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
+command-line option turns it on, like `--debug`, `--vsync`, `--pause`
+and `--crt`.
 
 - Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0, plus
   enhancements (see PLAN.md).
@@ -19,7 +20,8 @@ command-line option turns it on, like `--debug`, `--vsync` and `--pause`.
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
   `sdl2` package; with `--vsync`, the console runs up to 0.5% faster or
   slower against the sound card to keep the sound queue level; with
-  `--pause`, Escape pauses and resumes).
+  `--pause`, Escape pauses and resumes; with `--crt`, the bottom of every
+  three rows of the 3× picture is darker, like a CRT's scanline gaps).
   `--debug` puts the visuals beside the game in the same window: a second
   window breaks vsync on GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or

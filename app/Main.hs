@@ -12,6 +12,7 @@ import Data.List (partition)
 import Data.Sequence (Seq)
 import Data.Sequence qualified as Seq
 import Data.Tuple (swap)
+import Data.Vector.Storable qualified as SV
 import Data.Vector.Storable.Mutable qualified as MV
 import Foreign (nullPtr, peek, with)
 import NES (Button, Cartridge, Frame, Input (..), frameRate, frames, nestest, parseCartridge, sampleRate, visualsSize)
@@ -28,12 +29,12 @@ main = do
   case args of
     ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
     _
-      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause"]) args,
+      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause", "--crt"]) args,
         let on flag = flag `elem` flags ->
-          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause"}
-    _ -> die "usage: nes [--debug] [--vsync] [--pause] <rom.nes> | nes --nestest <rom.nes>"
+          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause", crt = on "--crt"}
+    _ -> die "usage: nes [--debug] [--vsync] [--pause] [--crt] <rom.nes> | nes --nestest <rom.nes>"
 
-data Options = Options {debug, vsync, pause :: Bool}
+data Options = Options {debug, vsync, pause, crt :: Bool}
 
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
@@ -46,7 +47,8 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- is smoothest at 60 or 120 Hz. With debug on, the
 -- visuals of what the emulator is doing go beside the game. (In a window
 -- of their own, they would upset the vsync.) With pause on, Escape pauses
--- and resumes the game.
+-- and resumes the game. With crt on, the bottom of every three rows is
+-- darker, like the gaps between a CRT's scanlines.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -66,21 +68,27 @@ play options cart = do
   let (w, h) = visualsSize
       height = if options.debug then max 720 h else 720
       size = SDL.V2 (if options.debug then 768 + w else 768) height
-      game = SDL.Rectangle (SDL.P (SDL.V2 0 ((height - 720) `div` 2))) (SDL.V2 768 720)
+      top = (height - 720) `div` 2
+      game = SDL.Rectangle (SDL.P (SDL.V2 0 top)) (SDL.V2 768 720)
+      gaps = SV.generate 240 (\row -> fromIntegral <$> SDL.Rectangle (SDL.P (SDL.V2 0 (top + 3 * row + 2))) (SDL.V2 768 1))
       beside = SDL.Rectangle (SDL.P (SDL.V2 768 0)) (SDL.V2 w h)
   window <- SDL.createWindow "nes" SDL.defaultWindow {SDL.windowInitialSize = fromIntegral <$> size, SDL.windowResizable = True}
   renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer {SDL.rendererType = if options.vsync then SDL.AcceleratedVSyncRenderer else SDL.AcceleratedRenderer}
   -- Draw at this size whatever the window's, with bars around if need be.
   SDL.rendererLogicalSize renderer SDL.$= Just (fromIntegral <$> size)
-  SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
+  SDL.rendererDrawBlendMode renderer SDL.$= SDL.BlendAlphaBlend
   texture <- SDL.createTexture renderer SDL.RGB24 SDL.TextureAccessStreaming (SDL.V2 256 240)
   visuals <- SDL.createTexture renderer SDL.RGB888 SDL.TextureAccessStreaming (fromIntegral <$> SDL.V2 w h)
   -- The core reads the buttons for each frame lazily from this channel, so
   -- they must be in it before the frame is drawn.
   inputs <- newChan
   let draw = do
+        SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
         SDL.clear renderer
         SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
+        when options.crt $ do
+          SDL.rendererDrawColor renderer SDL.$= SDL.V4 0 0 0 128
+          SDL.fillRects renderer gaps
         when options.debug (SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside)))
         SDL.present renderer -- with vsync, waits for the refresh
       loop paused owed outputs = do
