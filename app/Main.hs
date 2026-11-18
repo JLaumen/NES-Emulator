@@ -4,7 +4,7 @@
 module Main (main) where
 
 import Control.Concurrent (getChanContents, newChan, writeChan)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Sequence (Seq)
@@ -12,7 +12,7 @@ import Data.Sequence qualified as Seq
 import Data.Tuple (swap)
 import Data.Vector.Storable.Mutable qualified as MV
 import Data.Vector.Unboxed qualified as V
-import NES (Button, Cartridge, frames, nestest, parseCartridge, sampleRate)
+import NES (Button, Cartridge, frames, nestest, parseCartridge, sampleRate, visualsSize)
 import NES qualified
 import SDL qualified
 import System.Environment (getArgs)
@@ -23,8 +23,9 @@ main = do
   args <- getArgs
   case args of
     ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
-    [rom] -> load rom >>= play
-    _ -> die "usage: nes [--nestest] <rom.nes>"
+    ["--debug", rom] -> load rom >>= play True
+    [rom] -> load rom >>= play False
+    _ -> die "usage: nes [--nestest | --debug] <rom.nes>"
 
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
@@ -32,9 +33,11 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- | Play the game in a window, at three times the NES's resolution. Vsync
 -- paces the game: one frame per screen refresh, so a 60 Hz display is
 -- needed for the right speed. The sound goes through a queue that the
--- audio device empties at its own pace.
-play :: Cartridge -> IO ()
-play cart = do
+-- audio device empties at its own pace. With debug on, the visuals of what
+-- the emulator is doing go beside the game. (In a window of their own, they
+-- would upset the vsync.)
+play :: Bool -> Cartridge -> IO ()
+play debug cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
   queue <- newIORef Seq.empty
   (device, _) <-
@@ -49,9 +52,18 @@ play cart = do
           SDL.openDeviceName = Nothing
         }
   SDL.setAudioDevicePlaybackState device SDL.Play
-  window <- SDL.createWindow "nes" SDL.defaultWindow {SDL.windowInitialSize = SDL.V2 768 720}
+  let (w, h) = visualsSize
+      height = if debug then max 720 h else 720
+      size = SDL.V2 (if debug then 768 + w else 768) height
+      game = SDL.Rectangle (SDL.P (SDL.V2 0 ((height - 720) `div` 2))) (SDL.V2 768 720)
+      beside = SDL.Rectangle (SDL.P (SDL.V2 768 0)) (SDL.V2 w h)
+  window <- SDL.createWindow "nes" SDL.defaultWindow {SDL.windowInitialSize = fromIntegral <$> size, SDL.windowResizable = True}
   renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer {SDL.rendererType = SDL.AcceleratedVSyncRenderer}
+  -- Draw at this size whatever the window's, with bars around if need be.
+  SDL.rendererLogicalSize renderer SDL.$= Just (fromIntegral <$> size)
+  SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
   texture <- SDL.createTexture renderer SDL.RGB24 SDL.TextureAccessStreaming (SDL.V2 256 240)
+  visuals <- SDL.createTexture renderer SDL.RGB888 SDL.TextureAccessStreaming (fromIntegral <$> SDL.V2 w h)
   -- The core reads the buttons for each frame lazily from this channel, so
   -- they must be in it before the frame is drawn.
   inputs <- newChan
@@ -64,8 +76,12 @@ play cart = do
             queued <- Seq.length <$> readIORef queue
             let sound = Seq.fromList (resample (speed queued) out.sound)
             atomicModifyIORef' queue (\q -> (q <> sound, ()))
+            SDL.clear renderer
             _ <- SDL.updateTexture texture Nothing out.picture (256 * 3)
-            SDL.copy renderer texture Nothing Nothing
+            SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
+            when debug $ do
+              _ <- SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)
+              SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside))
             SDL.present renderer -- waits for the refresh
             loop rest
           [] -> pure ()

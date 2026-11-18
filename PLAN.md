@@ -18,6 +18,10 @@ Each step ends with something we can check.
    by nudging the playback rate (vsync paces the game). Check: games sound
    right without crackles.
 
+9. [x] **Visuals**: `--debug` shows nametables (with the scroll), pattern
+   tables, palettes, sprites, the sound channels as oscilloscopes, and the
+   CPU's registers and memory traffic, beside the game.
+
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
 are never hidden; only controller 1 is connected; the DMC doesn't steal

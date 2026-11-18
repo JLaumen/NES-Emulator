@@ -2,7 +2,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), Frame (..), sampleRate, frames, nestest) where
+module NES (Cartridge, parseCartridge, Button (..), Frame (..), sampleRate, visualsSize, frames, nestest) where
 
 import APU qualified
 import Bus (Bus)
@@ -20,6 +20,8 @@ import Controller qualified
 import Data.ByteString (ByteString)
 import Data.STRef (modifySTRef', readSTRef, writeSTRef)
 import PPU qualified
+import Visualise (Snapshot (..))
+import Visualise qualified
 
 -- * NTSC timing
 
@@ -44,8 +46,15 @@ data Frame = Frame
     picture :: ByteString,
     -- | The sound during the frame: mono, 'sampleRate' samples a second,
     -- from -1 to 1.
-    sound :: [Float]
+    sound :: [Float],
+    -- | A look inside: what the PPU, APU and CPU are doing, as a picture of
+    -- 'visualsSize' pixels, 4 bytes each (0x00RRGGBB in the machine's byte
+    -- order). Drawn only when needed.
+    visuals :: ByteString
   }
+
+visualsSize :: (Int, Int)
+visualsSize = (Visualise.width, Visualise.height)
 
 -- | The frames a game shows, given the buttons held during each. Each
 -- frame's buttons are needed only once that frame is.
@@ -58,9 +67,12 @@ frames cart inputs = Lazy.runST $ do
           Controller.press bus.controller buttons
           state' <- frame bus state
           picture <- PPU.picture bus.ppu
-          (sound, apu) <- APU.drain <$> readSTRef bus.apu
+          (sound, voices, apu) <- APU.drain <$> readSTRef bus.apu
           writeSTRef bus.apu apu
-          pure (state', Frame {picture, sound})
+          video <- PPU.video bus.ppu
+          (readHeat, writeHeat) <- Bus.heat bus
+          let visuals = Visualise.picture Snapshot {cpu = state', video, readHeat, writeHeat, sound, voices}
+          pure (state', Frame {picture, sound, visuals})
         (out :) <$> run state' rest
   run cpu inputs
 

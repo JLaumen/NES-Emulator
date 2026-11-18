@@ -21,6 +21,11 @@ package sdl2
 
 Keys: arrows, X (A), Z (B), Enter (Start), right Shift (Select).
 
+`cabal run nes -- --debug game.nes` shows, beside the game, what the
+emulator is doing: the nametables with the part on screen outlined, the
+pattern tables, palettes and sprites, each sound channel as an
+oscilloscope, and the CPU's registers and memory reads and writes.
+
 The game runs at your display's refresh rate, so it needs a 60 Hz display
 to run at the right speed.
 

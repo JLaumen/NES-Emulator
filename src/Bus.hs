@@ -2,7 +2,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The CPU's view of memory.
-module Bus (Bus (ppu, apu, controller, cart), new, load, store, loadWord) where
+module Bus (Bus (ppu, apu, controller, cart), new, load, store, loadWord, heat) where
 
 import APU (APU)
 import APU qualified
@@ -11,7 +11,8 @@ import Control.Monad (forM_)
 import Control.Monad.ST (ST)
 import Controller (Controller)
 import Controller qualified
-import Data.Array.ST (STUArray, newArray, readArray, writeArray)
+import Data.Array.ST (STUArray, freeze, newArray, readArray, writeArray)
+import Data.Array.Unboxed (UArray)
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
 import Data.Word (Word16, Word8)
@@ -23,7 +24,10 @@ data Bus s = Bus
     ppu :: PPU s,
     apu :: STRef s APU,
     controller :: Controller s,
-    cart :: Cartridge
+    cart :: Cartridge,
+    -- | How recently the CPU read and wrote each address: 255 just now,
+    -- cooling off with each 'heat'.
+    readHeat, writeHeat :: STUArray s Word16 Word8
   }
 
 new :: Cartridge -> APU -> ST s (Bus s)
@@ -32,33 +36,39 @@ new cart apu0 = do
   ppu <- PPU.new cart
   apu <- newSTRef apu0
   controller <- Controller.new
-  pure Bus {ram, ppu, apu, controller, cart}
+  readHeat <- newArray (0, 0xFFFF) 0
+  writeHeat <- newArray (0, 0xFFFF) 0
+  pure Bus {ram, ppu, apu, controller, cart, readHeat, writeHeat}
 
 -- | Memory map: 2 KiB RAM mirrored up to $2000, PPU registers mirrored up
 -- to $4000, APU and IO registers, and the cartridge from $8000. Only the
 -- first controller is connected.
 load :: Bus s -> Word16 -> ST s Word8
-load bus addr
-  | addr < 0x2000 = readArray bus.ram (addr .&. 0x7FF)
-  | addr < 0x4000 = PPU.readRegister bus.ppu addr
-  | addr == 0x4015 = do
-      (status, apu) <- APU.readStatus <$> readSTRef bus.apu
-      status <$ writeSTRef bus.apu apu
-  | addr == 0x4016 = Controller.readBit bus.controller
-  | addr >= 0x8000 = pure (prgByte bus.cart addr)
-  | otherwise = pure 0
+load bus addr = writeArray bus.readHeat addr 255 >> value
+  where
+    value
+      | addr < 0x2000 = readArray bus.ram (addr .&. 0x7FF)
+      | addr < 0x4000 = PPU.readRegister bus.ppu addr
+      | addr == 0x4015 = do
+          (status, apu) <- APU.readStatus <$> readSTRef bus.apu
+          status <$ writeSTRef bus.apu apu
+      | addr == 0x4016 = Controller.readBit bus.controller
+      | addr >= 0x8000 = pure (prgByte bus.cart addr)
+      | otherwise = pure 0
 
 store :: Bus s -> Word16 -> Word8 -> ST s ()
-store bus addr value
-  | addr < 0x2000 = writeArray bus.ram (addr .&. 0x7FF) value
-  | addr < 0x4000 = PPU.writeRegister bus.ppu addr value
-  -- OAM DMA: copy a page to the sprites. (The CPU stalls for 513 cycles,
-  -- which we skip.)
-  | addr == 0x4014 = forM_ [0 .. 255] $ \i ->
-      load bus (fromIntegral value `shiftL` 8 + i) >>= PPU.writeRegister bus.ppu 0x2004
-  | addr == 0x4016 = Controller.latch bus.controller
-  | addr < 0x4018 = modifySTRef' bus.apu (APU.write addr value)
-  | otherwise = pure ()
+store bus addr value = writeArray bus.writeHeat addr 255 >> effect
+  where
+    effect
+      | addr < 0x2000 = writeArray bus.ram (addr .&. 0x7FF) value
+      | addr < 0x4000 = PPU.writeRegister bus.ppu addr value
+      -- OAM DMA: copy a page to the sprites. (The CPU stalls for 513
+      -- cycles, which we skip.)
+      | addr == 0x4014 = forM_ [0 .. 255] $ \i ->
+          load bus (fromIntegral value `shiftL` 8 + i) >>= PPU.writeRegister bus.ppu 0x2004
+      | addr == 0x4016 = Controller.latch bus.controller
+      | addr < 0x4018 = modifySTRef' bus.apu (APU.write addr value)
+      | otherwise = pure ()
 
 -- | Load a little-endian word.
 loadWord :: Bus s -> Word16 -> ST s Word16
@@ -66,3 +76,12 @@ loadWord bus addr = do
   lo <- load bus addr
   hi <- load bus (addr + 1)
   pure (fromIntegral hi `shiftL` 8 .|. fromIntegral lo)
+
+-- | How recently the CPU read and wrote each address (see 'readHeat'); then
+-- cool them off a little.
+heat :: Bus s -> ST s (UArray Word16 Word8, UArray Word16 Word8)
+heat bus = do
+  hot <- (,) <$> freeze bus.readHeat <*> freeze bus.writeHeat
+  forM_ [bus.readHeat, bus.writeHeat] $ \a -> forM_ [0 .. 0xFFFF :: Int] $ \i ->
+    readArray a (fromIntegral i) >>= writeArray a (fromIntegral i) . \h -> h - min h 8
+  pure hot

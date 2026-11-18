@@ -11,7 +11,9 @@ should be minimal, clear, and elegant. Common games should still play.
   (vsync), so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
   `sdl2` package; the sound plays up to 0.5% faster or slower to keep its
-  queue level, since vsync paces the game).
+  queue level, since vsync paces the game). `--debug` puts the visuals
+  beside the game in the same window: a second window breaks vsync on
+  GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or
   external, when it improves the quality of the code; don't add one that
   doesn't.
@@ -22,9 +24,11 @@ should be minimal, clear, and elegant. Common games should still play.
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
   NOPs), `PPU` (registers, VRAM, OAM; renders background and
   sprites a scanline at a time), `APU` (a pure state machine in an `STRef`,
-  caught up once a scanline; samples at 44.1 kHz), `Controller` ($4016), `NES`
-  (public API: a lazy list of frames, each a picture and its sound, from a
-  lazy list of buttons held, run scanline by scanline).
+  caught up once a scanline; samples at 44.1 kHz), `Controller` ($4016),
+  `Visualise` (draws a snapshot of the PPU, APU and CPU into one picture),
+  `NES` (public API: a lazy list of frames, each a picture, its sound and
+  its visuals, drawn only when used, from a lazy list of buttons held, run
+  scanline by scanline).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
   `sed -E 's/^(....).*(A:.. X:.. Y:.. P:.. SP:..).*(CYC:[0-9]+)\r?$/\1 \2 \3/' nestest.log > expected.txt`

@@ -8,6 +8,7 @@ module APU (APU, new, write, readStatus, run, irq, drain) where
 
 import Cartridge (Cartridge, prgByte)
 import Data.Bits (shiftL, shiftR, testBit, xor, (.&.), (.|.))
+import Data.List (mapAccumL)
 import Data.Maybe (isNothing)
 import Data.Word (Word16, Word8)
 
@@ -22,8 +23,9 @@ data APU = APU
     cyclesPerSample, untilSample :: !Double,
     -- | A high-pass filter, as in the console, takes out the DC offset.
     filterGain, lastIn, lastOut :: !Float,
-    -- | Samples since the last 'drain', newest first.
-    samples :: [Float]
+    -- | The channels' levels at each sample since the last 'drain', newest
+    -- first.
+    voices :: [[Int]]
   }
 
 -- | A pulse, triangle or noise channel; each uses only some fields.
@@ -113,7 +115,7 @@ new cpuRate sampleRate =
       filterGain = realToFrac (rc / (rc + 1 / sampleRate)),
       lastIn = 0,
       lastOut = 0,
-      samples = []
+      voices = []
     }
   where
     rc = 1 / (2 * pi * 90) -- a 90 Hz cutoff
@@ -219,9 +221,15 @@ readStatus apu = (status, apu {frameIrq = False})
 irq :: APU -> Bool
 irq apu = apu.frameIrq || apu.dmc.irqFlag
 
--- | Take the samples made so far, oldest first.
-drain :: APU -> ([Float], APU)
-drain apu = (reverse apu.samples, apu {samples = []})
+-- | Take the sound made so far, oldest first: the samples, and the
+-- channels' levels at each (pulse 1, pulse 2, triangle and noise from 0 to
+-- 15, the DMC from 0 to 127).
+drain :: APU -> ([Float], [[Int]], APU)
+drain apu = (sound, voices, apu {voices = [], lastIn, lastOut})
+  where
+    voices = reverse apu.voices
+    ((lastIn, lastOut), sound) = mapAccumL highPass (apu.lastIn, apu.lastOut) (map mix voices)
+    highPass (i, o) x = let o' = apu.filterGain * (o + x - i) in ((x, o'), o')
 
 -- * Running
 
@@ -379,27 +387,21 @@ fetch cart d
 sampleIfDue :: APU -> APU
 sampleIfDue apu
   | apu.untilSample > 0 = apu
-  | otherwise =
-      apu
-        { samples = out : apu.samples,
-          lastIn = mixed,
-          lastOut = out,
-          untilSample = apu.untilSample + apu.cyclesPerSample
-        }
-  where
-    mixed = mix apu
-    out = apu.filterGain * (apu.lastOut + mixed - apu.lastIn)
+  | otherwise = apu {voices = levels apu : apu.voices, untilSample = apu.untilSample + apu.cyclesPerSample}
 
 -- | The channels' levels combined, the console's non-linear way.
-mix :: APU -> Float
-mix apu = pulses + others
+mix :: [Int] -> Float
+mix voices = pulses + others
   where
-    p = fromIntegral (pulse apu.pulse1 + pulse apu.pulse2)
+    p = fromIntegral (sum (take 2 voices))
     pulses = if p == 0 then 0 else 95.88 / (8128 / p + 100)
-    t = fromIntegral (triangleLevel apu.triangle) / 8227
-    n = fromIntegral (noiseLevel apu.noise) / 12241
-    d = fromIntegral apu.dmc.level / 22638
-    others = if t + n + d == 0 then 0 else 159.79 / (1 / (t + n + d) + 100)
+    tnd = sum (zipWith (\v w -> fromIntegral v / w) (drop 2 voices) [8227, 12241, 22638])
+    others = if tnd == 0 then 0 else 159.79 / (1 / tnd + 100)
+
+-- | The channels' levels now.
+levels :: APU -> [Int]
+levels apu = [pulse apu.pulse1, pulse apu.pulse2, triangleLevel apu.triangle, noiseLevel apu.noise, apu.dmc.level]
+  where
     pulse c
       | c.length == 0 || muted c || not (testBit (dutyCycles !! c.duty) (7 - c.step)) = 0
       | otherwise = volume c

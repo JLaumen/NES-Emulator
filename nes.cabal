@@ -39,10 +39,12 @@ library
     Controller
     CPU
     PPU
+    Visualise
 
   build-depends:
     array ^>=0.5.8,
     bytestring ^>=0.12.2,
+    vector ^>=0.13.2,
 
 executable nes
   import: shared

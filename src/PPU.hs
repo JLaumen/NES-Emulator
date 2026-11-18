@@ -1,9 +1,10 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The picture processing unit: its registers, its memory, and rendering
 -- one scanline at a time.
-module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture) where
+module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture, Video (..), video, colors) where
 
 import Cartridge (Cartridge (..), Mirroring (..))
 import Control.Monad (forM, forM_, when)
@@ -40,6 +41,9 @@ data PPU s = PPU
     oam :: STUArray s Int Word8,
     -- | Palette indices of the picture being drawn, row by row.
     pixels :: STUArray s Int Word8,
+    -- | Where each line of the picture started, in the 512×480 map of all
+    -- four nametables.
+    scrollX, scrollY :: STUArray s Int Int,
     mirroring :: Mirroring
   }
 
@@ -49,7 +53,9 @@ new cart = do
   memory <- newListArray (0, 0x3FFF) (BS.unpack cart.chr ++ repeat 0)
   oam <- newArray (0, 255) 0
   pixels <- newArray (0, 256 * 240 - 1) 0
-  pure PPU {regs, memory, oam, pixels, mirroring = cart.mirroring}
+  scrollX <- newArray (0, 239) 0
+  scrollY <- newArray (0, 239) 0
+  pure PPU {regs, memory, oam, pixels, scrollX, scrollY, mirroring = cart.mirroring}
 
 -- | Map an address onto the memory that backs it: nametables onto two
 -- through mirroring, and the background colour of the sprite palettes onto
@@ -154,6 +160,9 @@ nextLine v
 render :: PPU s -> Int -> ST s ()
 render ppu y = do
   r <- readSTRef ppu.regs
+  -- Coarse and fine scroll, in the nametable that v picks.
+  writeArray ppu.scrollX y (fromIntegral ((r.v .&. 0x1F) * 8 + fromIntegral r.fineX + (r.v .&. 0x400) `shiftR` 2))
+  writeArray ppu.scrollY y (fromIntegral ((r.v `shiftR` 5 .&. 0x1F) * 8 + r.v `shiftR` 12 .&. 7) + if testBit r.v 11 then 240 else 0)
   sprites <- if testBit r.mask 4 then spritesOn ppu r y else pure []
   forM_ [0 .. 255] $ \x -> do
     back <- if testBit r.mask 3 then background ppu r x else pure 0
@@ -238,6 +247,27 @@ picture ppu = do
   indices <- freeze ppu.pixels :: ST s (UArray Int Word8)
   let byte i = colors ! (3 * fromIntegral (indices ! (i `div` 3) .&. 0x3F) + i `mod` 3)
   pure (fst (BS.unfoldrN (3 * 256 * 240) (\i -> Just (byte i, i + 1)) 0))
+
+-- | What the PPU holds, for a look inside.
+data Video = Video
+  { -- | The PPU address space, $0000–$3FFF, mirrors included.
+    memory :: UArray Word16 Word8,
+    oam :: UArray Int Word8,
+    ctrl :: Word8,
+    -- | Where each line of the last picture started, in the 512×480 map
+    -- of all four nametables.
+    scrollX, scrollY :: UArray Int Int
+  }
+
+video :: forall s. PPU s -> ST s Video
+video ppu = do
+  memory <- freeze ppu.memory :: ST s (UArray Word16 Word8)
+  let mirrored = listArray (0, 0x3FFF) [memory ! resolve ppu.mirroring a | a <- [0 .. 0x3FFF]]
+  oam <- freeze ppu.oam
+  r <- readSTRef ppu.regs
+  scrollX <- freeze ppu.scrollX
+  scrollY <- freeze ppu.scrollY
+  pure Video {memory = mirrored, oam, ctrl = r.ctrl, scrollX, scrollY}
 
 -- | The NES's 64 colours in RGB, three bytes each.
 colors :: UArray Int Word8
