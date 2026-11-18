@@ -39,6 +39,8 @@ Each step ends with something we can check.
 16. [x] **Picture**: `--fullscreen`; `--wide` for the NES's 8:7 pixels;
     `--smooth` scales the 3× picture to the window linearly (sharp
     bilinear), so pixels look even at any size without blurring.
+17. [x] **Palettes**: `--palette file.pal` shows the colours as a `.pal`
+    file has them; `PALs/` holds standard ones.
 
 ## Next
 
@@ -48,7 +50,8 @@ play; each is off unless its command-line option turns it on.
 - **Controls**: turbo buttons; gamepads (SDL's GameController); a second
   controller; keys of one's own choosing.
 - **Picture**: integer scaling; screenshots (SDL saves BMPs); cropping the
-  8 overscan rows top and bottom; a choice of palettes (`.pal` files).
+  8 overscan rows top and bottom; colour emphasis (with 512-colour
+  `.pal` files).
 - **Sound**: muting single channels; a volume; the console's other filters
   (a second high-pass and a 14 kHz low-pass); the channels spread across
   stereo.

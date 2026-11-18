@@ -30,7 +30,8 @@ data Snapshot = Snapshot
     readHeat, writeHeat :: UArray Word16 Word8,
     -- | The frame's samples, and the channels' levels at each.
     sound :: [Float],
-    voices :: [[Int]]
+    voices :: [[Int]],
+    palette :: PPU.Palette
   }
 
 width, height :: Int
@@ -58,7 +59,7 @@ picture s = runST $ do
   canvas <- MV.replicate (width * height) background
   let c = Canvas canvas
   -- The 32 palette entries (8 palettes of 4) in RGB.
-  let colors = listArray (0, 31) [color s.video p i | p <- [0 .. 7], i <- [0 .. 3]]
+  let colors = listArray (0, 31) [color s.palette s.video p i | p <- [0 .. 7], i <- [0 .. 3]]
   nametables c s.video colors 16 16
   sound c s 16 544
   patternTables c s.video colors 544 16
@@ -249,8 +250,8 @@ drawTile c v x y size addr flipH flipV colorOf = forM_ [0 .. 7] $ \row -> do
       if size == 1 then pixel c (x + dx) (y + dy) else rect c (x + dx * size) (y + dy * size) size size
 
 -- | Entry i (0–3) of palette p (0–3 background, 4–7 sprites), in RGB.
-color :: Video -> Int -> Int -> Color
-color v p i = sum [fromIntegral (PPU.colors ! (3 * index + k)) `shiftL` (16 - 8 * k) | k <- [0 .. 2]]
+color :: PPU.Palette -> Video -> Int -> Int -> Color
+color colors v p i = sum [fromIntegral (colors ! (3 * index + k)) `shiftL` (16 - 8 * k) | k <- [0 .. 2]]
   where
     index = fromIntegral (v.memory ! (0x3F00 + fromIntegral (if i == 0 then 0 else p * 4 + i)) .&. 0x3F)
 

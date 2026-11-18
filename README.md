@@ -43,6 +43,11 @@ are a little wider than tall (8:7), as on a TV. With `--smooth`, the
 picture scales smoothly, so its pixels look even at any size, without
 blurring.
 
+With `--palette file.pal`, the game shows its colours as that palette
+has them. The NES makes a TV signal, not RGB, so no one palette is right;
+`PALs/` holds well-known ones, from FCEUX's collection, as in
+`--palette PALs/Smooth_FBX.pal`.
+
 The options combine, as in `cabal run nes -- --debug --vsync game.nes`.
 
 The CPU passes nestest's official-opcode tests

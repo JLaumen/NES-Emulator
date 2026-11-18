@@ -2,7 +2,7 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 -- | The NES emulator core.
-module NES (Cartridge, parseCartridge, Button (..), Input (..), Frame (..), frameRate, sampleRate, visualsSize, frames, nestest) where
+module NES (Cartridge, parseCartridge, Palette, parsePalette, defaultPalette, Button (..), Input (..), Frame (..), frameRate, sampleRate, visualsSize, frames, nestest) where
 
 import APU qualified
 import Bus (Bus)
@@ -19,6 +19,7 @@ import Controller (Button (..))
 import Controller qualified
 import Data.ByteString (ByteString)
 import Data.STRef (modifySTRef', readSTRef, writeSTRef)
+import PPU (Palette, defaultPalette, parsePalette)
 import PPU qualified
 import Visualise (Snapshot (..))
 import Visualise qualified
@@ -67,10 +68,10 @@ data Input = Input {buttons :: [Button], speed :: Double}
 
 -- | The frames a game shows, given the most sprites to draw on a scanline
 -- (8 on the console; 64 ends the flicker of games that take turns
--- drawing more) and the input for each frame. Each frame's input is
--- needed only once that frame is.
-frames :: Int -> Cartridge -> [Input] -> [Frame]
-frames spriteLimit cart inputs = Lazy.runST $ do
+-- drawing more), the palette to show them in, and the input for each
+-- frame. Each frame's input is needed only once that frame is.
+frames :: Int -> Palette -> Cartridge -> [Input] -> [Frame]
+frames spriteLimit palette cart inputs = Lazy.runST $ do
   (bus, cpu) <- strictToLazyST (boot spriteLimit cart)
   let run _ [] = pure []
       run state (input : rest) = do
@@ -78,12 +79,12 @@ frames spriteLimit cart inputs = Lazy.runST $ do
           Controller.press bus.controller input.buttons
           modifySTRef' bus.apu (APU.atSpeed input.speed)
           state' <- frame bus state
-          picture <- PPU.picture bus.ppu
+          picture <- PPU.picture palette bus.ppu
           (sound, voices, apu) <- APU.drain <$> readSTRef bus.apu
           writeSTRef bus.apu apu
           video <- PPU.video bus.ppu
           (readHeat, writeHeat) <- Bus.heat bus
-          let visuals = Visualise.picture Snapshot {cpu = state', video, readHeat, writeHeat, sound, voices}
+          let visuals = Visualise.picture Snapshot {cpu = state', video, readHeat, writeHeat, sound, voices, palette}
           pure (state', Frame {picture, sound, visuals})
         (out :) <$> run state' rest
   run cpu inputs

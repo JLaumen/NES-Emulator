@@ -4,7 +4,7 @@
 
 -- | The picture processing unit: its registers, its memory, and rendering
 -- one scanline at a time.
-module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture, Video (..), video, colors) where
+module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture, Video (..), video, Palette, defaultPalette, parsePalette) where
 
 import Cartridge (Cartridge (..), Mirroring (..))
 import Control.Monad (forM, forM_, when)
@@ -243,9 +243,10 @@ shade palette (lo, hi) i
     pixel = plane lo .|. plane hi `shiftL` 1
     plane b = fromIntegral (b `shiftR` (7 - i) .&. 1)
 
--- | The finished picture: 256×240 pixels, 3 bytes (RGB) each.
-picture :: forall s. PPU s -> ST s ByteString
-picture ppu = do
+-- | The finished picture in the palette's colours: 256×240 pixels, 3
+-- bytes (RGB) each.
+picture :: forall s. Palette -> PPU s -> ST s ByteString
+picture colors ppu = do
   indices <- freeze ppu.pixels :: ST s (UArray Int Word8)
   let byte i = colors ! (3 * fromIntegral (indices ! (i `div` 3) .&. 0x3F) + i `mod` 3)
   pure (fst (BS.unfoldrN (3 * 256 * 240) (\i -> Just (byte i, i + 1)) 0))
@@ -271,9 +272,19 @@ video ppu = do
   scrollY <- freeze ppu.scrollY
   pure Video {memory = mirrored, oam, ctrl = r.ctrl, scrollX, scrollY}
 
--- | The NES's 64 colours in RGB, three bytes each.
-colors :: UArray Int Word8
-colors = listArray (0, 191) [fromIntegral (c `shiftR` s) | c <- palette, s <- [16, 8, 0]]
+-- | The RGB of the NES's 64 colours, three bytes each. The console makes
+-- a TV signal, not RGB, so each TV shows them a little differently.
+type Palette = UArray Int Word8
+
+-- | A palette from a .pal file: 64 colours of 3 bytes (RGB). More, as
+-- with the colours of every emphasis, are ignored.
+parsePalette :: ByteString -> Either String Palette
+parsePalette bytes
+  | BS.length bytes < 192 = Left "a palette needs 64 colours of 3 bytes (RGB)"
+  | otherwise = Right (listArray (0, 191) (BS.unpack bytes))
+
+defaultPalette :: Palette
+defaultPalette = listArray (0, 191) [fromIntegral (c `shiftR` s) | c <- palette, s <- [16, 8, 0]]
   where
     palette :: [Word32]
     palette =

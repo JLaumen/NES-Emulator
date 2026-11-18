@@ -15,7 +15,7 @@ import Data.Tuple (swap)
 import Data.Vector.Storable qualified as SV
 import Data.Vector.Storable.Mutable qualified as MV
 import Foreign (nullPtr, peek, with)
-import NES (Button, Cartridge, Frame, Input (..), frameRate, frames, nestest, parseCartridge, sampleRate, visualsSize)
+import NES (Button, Cartridge, Frame, Input (..), Palette, defaultPalette, frameRate, frames, nestest, parseCartridge, parsePalette, sampleRate, visualsSize)
 import NES qualified
 import SDL qualified
 import SDL.Internal.Types (Window (..))
@@ -26,12 +26,13 @@ import System.Exit (die)
 main :: IO ()
 main = do
   args <- getArgs
-  case args of
-    ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
-    _
-      | (given, [rom]) <- partition (`elem` flags) args,
-        let on flag = flag `elem` given ->
-          load rom
+  case valued "--palette" args of
+    (_, ["--nestest", rom]) -> load parseCartridge rom >>= mapM_ putStrLn . nestest
+    (file, rest)
+      | (given, [rom]) <- partition (`elem` flags) rest,
+        let on flag = flag `elem` given -> do
+          palette <- maybe (pure defaultPalette) (load parsePalette) file
+          load parseCartridge rom
             >>= play
               Options
                 { debug = on "--debug",
@@ -41,17 +42,25 @@ main = do
                   noFlicker = on "--no-flicker",
                   fullscreen = on "--fullscreen",
                   wide = on "--wide",
-                  smooth = on "--smooth"
+                  smooth = on "--smooth",
+                  palette
                 }
-    _ -> die ("usage: nes " ++ unwords ["[" ++ flag ++ "]" | flag <- flags] ++ " <rom.nes> | nes --nestest <rom.nes>")
+    _ -> die ("usage: nes " ++ unwords ["[" ++ flag ++ "]" | flag <- flags] ++ " [--palette <file.pal>] <rom.nes> | nes --nestest <rom.nes>")
 
 flags :: [String]
 flags = ["--debug", "--vsync", "--pause", "--crt", "--no-flicker", "--fullscreen", "--wide", "--smooth"]
 
-data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth :: Bool}
+-- | The value of the option given as @name value@, if any, and the other
+-- arguments.
+valued :: String -> [String] -> (Maybe String, [String])
+valued name (option : value : rest) | option == name = (Just value, rest)
+valued name (arg : rest) = (arg :) <$> valued name rest
+valued _ [] = (Nothing, [])
 
-load :: FilePath -> IO Cartridge
-load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
+data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth :: Bool, palette :: Palette}
+
+load :: (BS.ByteString -> Either String a) -> FilePath -> IO a
+load parse file = BS.readFile file >>= either (die . (("nes: " ++ file ++ ": ") ++)) pure . parse
 
 -- | Play the game in a window, at three times the NES's resolution or
 -- scaled to fit it. The sound goes through a queue that the audio device
@@ -67,7 +76,8 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- needn't take turns drawing them. With fullscreen on, the window fills
 -- the screen. With wide on, the NES's pixels are wider than tall, 8:7, as
 -- on a TV. With smooth on, the picture is scaled smoothly from three times
--- the NES's resolution, so its pixels look even at any size.
+-- the NES's resolution, so its pixels look even at any size. The palette
+-- gives the RGB of the NES's colours.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -154,7 +164,7 @@ play options cart = do
             when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
             run (count - 1) buttons rest
           [] -> pure Nothing
-  loop False 0 . frames (if options.noFlicker then 64 else 8) cart =<< getChanContents inputs
+  loop False 0 . frames (if options.noFlicker then 64 else 8) options.palette cart =<< getChanContents inputs
   SDL.closeAudioDevice device
   SDL.quit
 
