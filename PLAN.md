@@ -47,22 +47,48 @@ Each step ends with something we can check.
 Enhancements are not faithful to the console, but make games nicer to
 play; each is off unless its command-line option turns it on.
 
-- **Controls**: turbo buttons; gamepads (SDL's GameController); a second
-  controller; keys of one's own choosing.
+- **Controls**: turbo buttons; gamepads (SDL's GameController), with
+  rumble as a toy; a second controller; keys of one's own choosing; the
+  mouse as a Zapper light gun (Duck Hunt); an overlay of the buttons
+  held, for recordings and streams.
 - **Picture**: integer scaling; screenshots (SDL saves BMPs); cropping the
   8 overscan rows top and bottom; colour emphasis (with 512-colour
-  `.pal` files).
+  `.pal` files); `--ghost`, blending each frame with the last, like a
+  CRT's afterglow (games that flicker sprites on alternate frames then
+  show them steady and see-through, as on a TV); a shadow mask for
+  `--crt`, tinting the three columns of each 3× pixel red, green and blue;
+  Scale3x (AdvMAME3x), which rounds diagonals from each pixel's four
+  neighbours and fits the 3× picture exactly; NTSC composite colour
+  bleeding (a horizontal blur of the signal, as blargg's nes_ntsc does);
+  a TV bezel or vignette around the picture; a key that cycles through
+  the palettes in `PALs/`, which could gain Game Boy greens, greyscale,
+  sepia and Virtual Boy red.
 - **Sound**: muting single channels; a volume; the console's other filters
   (a second high-pass and a 14 kHz low-pass); the channels spread across
-  stereo.
+  stereo; an NSF player (`.nsf` files are music ripped from games: code
+  with an init and a play routine, called once a frame), showing the
+  oscilloscopes from `--debug`; the music exported as MIDI, from each
+  channel's period and volume.
 - **Time**: fast-forward (no pacing, only some frames drawn); slow motion;
   frame advance while paused; a reset key; save states (freeze the state
   into a value, thaw it to resume), which needs an API to step and resume
   a machine, not just a list of frames; then rewind, from a ring of
-  recent states.
+  recent states; slots, each with a thumbnail of its frame; resuming
+  where one quit, from a state saved on exit.
 - **Recording**: the game is a pure function of its inputs, so a list of
   inputs is a replay (a movie) that plays back exactly; sound to a WAV
-  file; video through ffmpeg.
+  file; video through ffmpeg; an instant replay, saving the last 30
+  seconds as a GIF from a ring of frames; TAS tools: editing a movie's
+  inputs frame by frame, with save states to branch from.
+- **Toys**: `--widescreen`, drawing the background wider than 256 pixels
+  from the nametables, which hold more of the level than is shown
+  (sprites there aren't drawn, and some games leave junk there); keys
+  that hide the background or the sprites; an auto-map, pasting each
+  frame's background into a growing picture of the level at its scroll
+  (status bars need leaving out, e.g. the rows above a split), saved as a
+  BMP; ghost racing, a recorded run played alongside and blended in
+  translucently; a cheat finder: search RAM for a value that changed as
+  the lives or health did, then hold it fixed.
 - **Latency**: run-ahead, after save states: run a frame or two ahead
   with the buttons held now and show that, hiding the game's own lag.
   Frame delay (sleep after each refresh, then read the buttons and run
@@ -71,12 +97,23 @@ play; each is off unless its command-line option turns it on.
   misses some on its own, so it gained only 1–3 ms. Worth retrying in
   fullscreen or on X11.
 - **Convenience**: dropping a ROM on the window loads it; the ROM's name
-  in the title; ROMs inside `.zip` files.
+  in the title; ROMs inside `.zip` files; a menu of the ROMs in a
+  folder; a configuration file for the options; brief on-screen messages
+  ("State saved"); pausing when the window loses focus; hiding the mouse
+  in fullscreen; a frame rate and speed overlay.
 - **Debugging**: with `--debug`, step an instruction or a scanline at a
-  time, breakpoints, and a disassembly around the PC.
-- **Maybe not**: CRT shaders and upscalers such as xBR (`--crt`'s scanline
-  gaps get most of the look); Game Genie codes; netplay (determinism and
-  save states make rollback possible, but it's a project of its own).
+  time, breakpoints (on the PC, or on reads and writes of an address),
+  and a disassembly around the PC; a memory viewer and editor; an event
+  view marking where on the screen the CPU wrote each PPU register (to
+  see split scrolls); the pattern tables saved as a PNG sprite sheet; a
+  code/data log of which ROM bytes ran as code and which were read as
+  data.
+- **Maybe not**: CRT shaders, screen curvature, bloom and upscalers such
+  as xBR (the CPU can't afford them; `--crt`'s scanline gaps get most of
+  the look); sprite motion trails and hitbox outlines; HD texture packs;
+  Game Genie codes; RetroAchievements; netplay (determinism and save
+  states make rollback possible, but it's a project of its own); a web
+  build (GHC's WebAssembly backend with SDL through Emscripten).
 
 Accuracy and coverage, when a game needs them:
 
@@ -92,7 +129,8 @@ Accuracy and coverage, when a game needs them:
   aliasing that averaging leaves.
 - PAL, and Dendy.
 - Checks: blargg's CPU, PPU and APU test ROMs, which print their result;
-  nestest in CI, if its licence allows.
+  nestest in CI, if its licence allows; golden frames: run a ROM headless
+  for some frames with set inputs and compare a hash of the picture.
 
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
