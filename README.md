@@ -26,8 +26,10 @@ emulator is doing: the nametables with the part on screen outlined, the
 pattern tables, palettes and sprites, each sound channel as an
 oscilloscope, and the CPU's registers and memory reads and writes.
 
-The game runs at your display's refresh rate, so it needs a 60 Hz display
-to run at the right speed.
+The sound card keeps the game at the right speed. With `--vsync`, the
+display does instead, one frame per refresh: smoother, but only the right
+speed on a 60 Hz display. The options combine, as in
+`cabal run nes -- --debug --vsync game.nes`.
 
 The CPU passes nestest's official-opcode tests
 (`cabal run nes -- --nestest nestest.nes` prints a trace).

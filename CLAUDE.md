@@ -7,11 +7,12 @@ should be minimal, clear, and elegant. Common games should still play.
   No cycle accuracy, no PAL (yet).
 - NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle, the CPU's clock rate.
   These constants live in one place (`NES`; the APU's tables are NTSC too)
-  so PAL can be added later. The window shows one frame per screen refresh
-  (vsync), so 60 Hz comes from the display.
+  so PAL can be added later. The sound card paces the game: each frame
+  waits for the sound queue to run low. `--vsync` paces it by the screen
+  refresh instead, so 60 Hz comes from the display.
 - Pure core in `src/`, IO in `app/` (an SDL2 window and audio device via the
-  `sdl2` package; the sound plays up to 0.5% faster or slower to keep its
-  queue level, since vsync paces the game). `--debug` puts the visuals
+  `sdl2` package; with `--vsync`, the sound plays up to 0.5% faster or
+  slower to keep its queue level). `--debug` puts the visuals
   beside the game in the same window: a second window breaks vsync on
   GNOME Wayland.
 - Warnings are errors. Use any GHC language feature or package, bundled or

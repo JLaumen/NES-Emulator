@@ -21,6 +21,8 @@ Each step ends with something we can check.
 9. [x] **Visuals**: `--debug` shows nametables (with the scroll), pattern
    tables, palettes, sprites, the sound channels as oscilloscopes, and the
    CPU's registers and memory traffic, beside the game.
+10. [x] **Pacing**: the sound card paces the game; `--vsync` makes the
+    screen refresh pace it instead.
 
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
