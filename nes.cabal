@@ -38,6 +38,7 @@ library
     Cartridge
     Controller
     CPU
+    Mapper
     PPU
     Visualise
 

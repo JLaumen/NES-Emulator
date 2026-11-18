@@ -9,7 +9,7 @@ command-line option turns it on, like `--debug`, `--vsync`, `--pause`,
 `--crt`, `--no-flicker`, `--fullscreen`, `--wide`, `--smooth`, `--ghost`
 and `--palette`.
 
-- Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0, plus
+- Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mappers 0 and 4, plus
   enhancements (see PLAN.md).
   No cycle accuracy, no PAL (yet).
 - NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle, the CPU's clock rate.
@@ -38,7 +38,10 @@ and `--palette`.
 - Core state lives in `ST` (mutable unboxed arrays for memory); the core's
   API stays pure via `runST`. Records use `OverloadedRecordDot` with
   `NoFieldSelectors`.
-- Modules: `Cartridge` (iNES parsing), `Bus` (CPU memory map), `CPU` (official
+- Modules: `Cartridge` (iNES parsing), `Mapper` (bank switching: 8 KiB
+  program and 1 KiB character banks in tables; NROM and MMC3, whose
+  scanline counter ticks at dot 260 of each rendered line, between which
+  `NES` answers IRQs), `Bus` (CPU memory map, PRG RAM at $6000), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
   NOPs), `PPU` (registers, VRAM, OAM; renders background and
   sprites a scanline at a time), `APU` (a pure state machine in an `STRef`,

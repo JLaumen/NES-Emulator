@@ -6,7 +6,6 @@
 -- state machine, run a few CPU cycles at a time.
 module APU (APU, new, atSpeed, write, readStatus, run, irq, drain) where
 
-import Cartridge (Cartridge, prgByte)
 import Data.Bits (shiftL, shiftR, testBit, xor, (.&.), (.|.))
 import Data.List (mapAccumL)
 import Data.Maybe (isNothing)
@@ -246,12 +245,12 @@ drain apu = (sound, reverse apu.voices, apu {samples = [], voices = [], lastIn, 
 
 -- * Running
 
--- | Run up to the given CPU cycle. The DMC reads its samples from the
--- cartridge.
-run :: Cartridge -> Int -> APU -> APU
-run cart target apu
+-- | Run up to the given CPU cycle. The DMC reads its samples from
+-- program ROM, as the CPU sees it.
+run :: (Word16 -> Word8) -> Int -> APU -> APU
+run rom target apu
   | n <= 0 = apu
-  | otherwise = run cart target (output k (mix (levels apu)) (frameStep (advance cart k apu)))
+  | otherwise = run rom target (output k (mix (levels apu)) (frameStep (advance rom k apu)))
   where
     n = target - apu.cycle
     -- Only noise changes level within these k cycles.
@@ -338,8 +337,8 @@ muted :: Channel -> Bool
 muted c = c.period < 8 || sweptPeriod c > 0x7FF
 
 -- | Run the channels' timers for n cycles.
-advance :: Cartridge -> Int -> APU -> APU
-advance cart n apu =
+advance :: (Word16 -> Word8) -> Int -> APU -> APU
+advance rom n apu =
   apu
     { pulse1 = sequencer 8 (2 * (apu.pulse1.period + 1)) apu.pulse1,
       pulse2 = sequencer 8 (2 * (apu.pulse2.period + 1)) apu.pulse2,
@@ -349,7 +348,7 @@ advance cart n apu =
          in apu.noise {timer, step = iterate shiftNoise apu.noise.step !! ticks},
       dmc =
         let (clock, ticks) = countDown apu.dmc.rate n apu.dmc.clock
-         in iterate (playBit cart) (fetch cart apu.dmc {clock}) !! ticks,
+         in iterate (playBit rom) (fetch rom apu.dmc {clock}) !! ticks,
       frameCycle = apu.frameCycle + n,
       cycle = apu.cycle + n,
       untilSample = apu.untilSample - fromIntegral n
@@ -382,8 +381,8 @@ countDown period n timer
   | otherwise = (period - (n - timer) `mod` period, (n - timer) `div` period + 1)
 
 -- | Play the DMC's next bit: move the level up or down by 2.
-playBit :: Cartridge -> DMC -> DMC
-playBit cart d = fetch cart (next shifted)
+playBit :: (Word16 -> Word8) -> DMC -> DMC
+playBit rom d = fetch rom (next shifted)
   where
     played
       | d.silent = d
@@ -398,9 +397,9 @@ playBit cart d = fetch cart (next shifted)
 
 -- | Fetch the sample's next byte when the buffer is empty; at the end,
 -- loop or raise an IRQ.
-fetch :: Cartridge -> DMC -> DMC
-fetch cart d
-  | isNothing d.buffer && d.remaining > 0 = ended d {buffer = Just (prgByte cart d.address), address = d.address + 1 .|. 0x8000, remaining = d.remaining - 1}
+fetch :: (Word16 -> Word8) -> DMC -> DMC
+fetch rom d
+  | isNothing d.buffer && d.remaining > 0 = ended d {buffer = Just (rom d.address), address = d.address + 1 .|. 0x8000, remaining = d.remaining - 1}
   | otherwise = d
   where
     ended e

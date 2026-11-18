@@ -44,6 +44,9 @@ Each step ends with something we can check.
 18. [x] **Afterglow**: `--ghost` blends each frame half and half with the
     last, so sprites flickered on alternate frames show steady and
     see-through, as on a TV.
+19. [x] **MMC3**: mapper 4, with bank switching, mirroring, PRG RAM at
+    $6000 and the scanline IRQ, counted at dot 260 of each rendered line.
+    Check: Super Mario Bros. 3 plays, its status bar steady.
 
 ## Next
 
@@ -118,11 +121,11 @@ play; each is off unless its command-line option turns it on.
 
 Accuracy and coverage, when a game needs them:
 
-- More mappers: MMC1 (1), UxROM (2), CNROM (3) and MMC3 (4), with its
-  scanline IRQ, cover most of the library; AxROM (7) next, with
-  single-screen mirroring. A mapper is a cartridge's `load`, `store` and
-  `resolve`, plus a hook at each scanline.
-- PRG-RAM at $6000–$7FFF, with battery saves to a file beside the ROM.
+- More mappers: MMC1 (1), UxROM (2) and CNROM (3) cover most of the
+  rest of the library; AxROM (7) next, with single-screen mirroring. A
+  mapper sets the bank tables in `Mapper` when its registers are
+  written.
+- Battery saves: PRG RAM to a file beside the ROM.
 - NES 2.0 headers.
 - The PPU mask's greyscale and colour-emphasis bits; the sprite-overflow
   flag; open-bus reads (the last value on the bus, not 0).
@@ -139,11 +142,12 @@ are never hidden; only controller 1 is connected; the DMC doesn't steal
 CPU cycles; the APU catches up once a scanline; averaging each sample
 (a box filter) leaves some aliasing, and noise isn't averaged; unofficial
 opcodes are NOPs; mid-scanline writes to the PPU take effect from the
-next line.
+next line; MMC3 counts every rendered line at dot 260, whichever pattern
+table the sprites use.
 
 ## Optimisations
 
-A frame takes about 5.5 ms (a third of a core at 60 Hz), so none is
+A frame takes about 6 ms (a third of a core at 60 Hz), so none is
 needed yet; they would buy room for run-ahead and fast-forward, and fewer
 garbage-collector pauses.
 
@@ -167,7 +171,8 @@ Doing less:
   and `mod`; write them three at a time into a buffer.
 - The CPU: whether an instruction takes the page-crossing cycle is a
   search of a list on every instruction; make it part of the table.
-  `prgByte` takes a `mod` on every read where a mask would do.
+  Every read of ROM or pattern tables looks up its bank in `Mapper`
+  (about 15% of a frame's time since MMC3 came); NROM could skip it.
 - The APU steps the noise's shift register one tick at a time; a table of
   its 32767- and 93-step sequences would jump straight there. Its tables
   are lists indexed with `!!`; arrays would do. It builds lists of levels

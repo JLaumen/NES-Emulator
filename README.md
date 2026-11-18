@@ -3,7 +3,8 @@
 [![CI](https://github.com/JLaumen/NES-Emulator/actions/workflows/ci.yml/badge.svg)](https://github.com/JLaumen/NES-Emulator/actions/workflows/ci.yml)
 
 A small, simple NES emulator in Haskell. It favours readable code over
-perfect accuracy and supports NTSC mapper 0 games, with sound.
+perfect accuracy and supports NTSC games on mapper 0 (NROM, as Super
+Mario Bros.) and mapper 4 (MMC3, as Super Mario Bros. 3), with sound.
 
 ```sh
 cabal run nes -- game.nes

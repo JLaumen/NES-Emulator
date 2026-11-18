@@ -19,6 +19,7 @@ import Controller (Button (..))
 import Controller qualified
 import Data.ByteString (ByteString)
 import Data.STRef (modifySTRef', readSTRef, writeSTRef)
+import Mapper qualified
 import PPU (Palette, defaultPalette, parsePalette)
 import PPU qualified
 import Visualise (Snapshot (..))
@@ -96,18 +97,24 @@ boot spriteLimit cart = do
   pure (bus, cpu)
 
 -- | Run a frame, from the pre-render line to the end of vblank, with the
--- CPU and APU running alongside each scanline.
+-- CPU and APU running alongside each scanline. Interrupt requests are
+-- answered at the start of a line and at dot 260, where MMC3 counts it.
 frame :: Bus s -> CPU -> ST s CPU
 frame bus start = foldM line start [-1 .. scanlines - 2]
   where
     line cpu n = do
+      let lineStart = start.cycles * dotsPerCycle + (n + 1) * dotsPerLine
       nmi <- PPU.startLine bus.ppu n
-      irq <- APU.irq <$> readSTRef bus.apu
-      cpu' <- (if nmi then CPU.nmi bus else if irq then CPU.irq bus else pure) cpu
-      cpu'' <- runUntil (start.cycles * dotsPerCycle + (n + 2) * dotsPerLine) cpu'
+      cpu' <- (if nmi then CPU.nmi bus else request) cpu >>= runUntil (lineStart + 260)
+      PPU.hblank bus.ppu n
+      cpu'' <- request cpu' >>= runUntil (lineStart + dotsPerLine)
       -- The APU catches up once a line, which is close enough for sound.
-      modifySTRef' bus.apu (APU.run bus.cart cpu''.cycles)
+      rom <- Mapper.programROM bus.mapper
+      modifySTRef' bus.apu (APU.run rom cpu''.cycles)
       cpu'' <$ PPU.endLine bus.ppu n
+    request cpu = do
+      irq <- (||) . APU.irq <$> readSTRef bus.apu <*> Mapper.irq bus.mapper
+      if irq then CPU.irq bus cpu else pure cpu
     runUntil dot cpu
       | cpu.cycles * dotsPerCycle >= dot = pure cpu
       | otherwise = CPU.step bus cpu >>= runUntil dot

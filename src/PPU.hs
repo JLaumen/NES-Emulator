@@ -4,18 +4,20 @@
 
 -- | The picture processing unit: its registers, its memory, and rendering
 -- one scanline at a time.
-module PPU (PPU, new, readRegister, writeRegister, startLine, endLine, picture, Video (..), video, Palette, defaultPalette, parsePalette) where
+module PPU (PPU, new, readRegister, writeRegister, startLine, hblank, endLine, picture, Video (..), video, Palette, defaultPalette, parsePalette) where
 
-import Cartridge (Cartridge (..), Mirroring (..))
+import Cartridge (Mirroring (..))
 import Control.Monad (forM, forM_, when)
 import Control.Monad.ST (ST)
-import Data.Array.ST (STUArray, freeze, newArray, newListArray, readArray, writeArray)
+import Data.Array.ST (STUArray, freeze, newArray, readArray, writeArray)
 import Data.Array.Unboxed (UArray, listArray, (!))
 import Data.Bits (clearBit, complement, setBit, shiftL, shiftR, testBit, xor, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
 import Data.Word (Word16, Word32, Word8)
+import Mapper (Mapper)
+import Mapper qualified
 
 data Registers = Registers
   { ctrl, mask, status :: !Word8,
@@ -33,8 +35,9 @@ data Registers = Registers
 
 data PPU s = PPU
   { regs :: STRef s Registers,
-    -- | The 16 KiB PPU address space, of which only the pattern tables, two
-    -- nametables and the palette exist; see 'resolve'.
+    -- | The PPU address space from $2000, of which only two nametables
+    -- and the palette exist; see 'resolve'. The pattern tables below are
+    -- the cartridge's.
     memory :: STUArray s Word16 Word8,
     -- | Object attribute memory: 64 sprites of 4 bytes (y, tile,
     -- attributes, x).
@@ -44,27 +47,26 @@ data PPU s = PPU
     -- | Where each line of the picture started, in the 512×480 map of all
     -- four nametables.
     scrollX, scrollY :: STUArray s Int Int,
-    mirroring :: Mirroring,
+    mapper :: Mapper s,
     -- | The most sprites drawn on a scanline: 8 on the console.
     spriteLimit :: Int
   }
 
-new :: Int -> Cartridge -> ST s (PPU s)
-new spriteLimit cart = do
+new :: Int -> Mapper s -> ST s (PPU s)
+new spriteLimit mapper = do
   regs <- newSTRef Registers {ctrl = 0, mask = 0, status = 0, v = 0, t = 0, fineX = 0, latch = False, buffer = 0, oamAddr = 0}
-  memory <- newListArray (0, 0x3FFF) (BS.unpack cart.chr ++ repeat 0)
+  memory <- newArray (0x2000, 0x3FFF) 0
   oam <- newArray (0, 255) 0
   pixels <- newArray (0, 256 * 240 - 1) 0
   scrollX <- newArray (0, 239) 0
   scrollY <- newArray (0, 239) 0
-  pure PPU {regs, memory, oam, pixels, scrollX, scrollY, mirroring = cart.mirroring, spriteLimit}
+  pure PPU {regs, memory, oam, pixels, scrollX, scrollY, mapper, spriteLimit}
 
--- | Map an address onto the memory that backs it: nametables onto two
--- through mirroring, and the background colour of the sprite palettes onto
--- that of the background palettes.
+-- | Map an address from $2000 onto the memory that backs it: nametables
+-- onto two through mirroring, and the background colour of the sprite
+-- palettes onto that of the background palettes.
 resolve :: Mirroring -> Word16 -> Word16
 resolve mirroring addr
-  | a < 0x2000 = a
   | a < 0x3F00 = case mirroring of
       Vertical -> 0x2000 .|. a .&. 0x7FF
       Horizontal -> 0x2000 .|. a .&. 0x3FF .|. (a .&. 0x800) `shiftR` 1
@@ -74,10 +76,14 @@ resolve mirroring addr
     a = addr .&. 0x3FFF
 
 peek :: PPU s -> Word16 -> ST s Word8
-peek ppu = readArray ppu.memory . resolve ppu.mirroring
+peek ppu addr
+  | addr .&. 0x3FFF < 0x2000 = Mapper.loadChr ppu.mapper (addr .&. 0x1FFF)
+  | otherwise = Mapper.mirroring ppu.mapper >>= \m -> readArray ppu.memory (resolve m addr)
 
 poke :: PPU s -> Word16 -> Word8 -> ST s ()
-poke ppu = writeArray ppu.memory . resolve ppu.mirroring
+poke ppu addr value
+  | addr .&. 0x3FFF < 0x2000 = Mapper.storeChr ppu.mapper (addr .&. 0x1FFF) value
+  | otherwise = Mapper.mirroring ppu.mapper >>= \m -> writeArray ppu.memory (resolve m addr) value
 
 -- * CPU registers $2000–$2007 (mirrored up to $3FFF)
 
@@ -135,6 +141,13 @@ startLine ppu line
       writeSTRef ppu.regs r {status = setBit r.status 7}
       pure (testBit r.ctrl 7)
   | otherwise = pure False
+
+-- | Dot 260 of a scanline, as the PPU fetches the next line's sprites:
+-- with rendering on, MMC3 counts the line.
+hblank :: PPU s -> Int -> ST s ()
+hblank ppu line = do
+  r <- readSTRef ppu.regs
+  when (line < 240 && r.mask .&. 0x18 /= 0) (Mapper.scanline ppu.mapper)
 
 -- | End a scanline, after the CPU has run alongside it: move v down a line
 -- and back to the left edge, or for the pre-render line, to the top left.
@@ -264,8 +277,10 @@ data Video = Video
 
 video :: forall s. PPU s -> ST s Video
 video ppu = do
-  memory <- freeze ppu.memory :: ST s (UArray Word16 Word8)
-  let mirrored = listArray (0, 0x3FFF) [memory ! resolve ppu.mirroring a | a <- [0 .. 0x3FFF]]
+  patterns <- Mapper.patternTables ppu.mapper
+  names <- freeze ppu.memory :: ST s (UArray Word16 Word8)
+  m <- Mapper.mirroring ppu.mapper
+  let mirrored = listArray (0, 0x3FFF) [if a < 0x2000 then patterns a else names ! resolve m a | a <- [0 .. 0x3FFF]]
   oam <- freeze ppu.oam
   r <- readSTRef ppu.regs
   scrollX <- freeze ppu.scrollX
