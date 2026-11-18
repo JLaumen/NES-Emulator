@@ -2,8 +2,12 @@
 
 Goal: the simplest NES emulator, not the most accurate. Code and docs alike
 should be minimal, clear, and elegant. Common games should still play.
+Simplest means the implementation, not the features: enhancements that
+make games nicer to play (pause, save states, no sprite flicker, …) are
+welcome, even when the console couldn't do them.
 
-- Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0.
+- Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mapper 0, plus
+  enhancements (see PLAN.md).
   No cycle accuracy, no PAL (yet).
 - NTSC timing: 262 scanlines, 3 PPU dots per CPU cycle, the CPU's clock rate.
   These constants live in one place (`NES`; the APU's tables are NTSC too)

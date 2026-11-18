@@ -30,4 +30,19 @@ are never hidden; only controller 1 is connected; the DMC doesn't steal
 CPU cycles; the APU catches up once a scanline and samples without
 filtering out aliasing.
 
+Next, enhancements: not faithful to the console, but nicer to play.
+
+- **In `app/`**: pause; fast-forward (no pacing, every few frames drawn);
+  turbo buttons; gamepads (SDL's GameController); fullscreen and integer
+  scaling; screenshots; cropping the 8 overscan rows top and bottom.
+- **In the core**: an option to lift the 8-sprites-a-scanline limit (no
+  flicker); a choice of palettes; a low-pass filter against harsh,
+  aliased sound; muting single sound channels.
+- **Bigger**: save states (freeze the state into a value, thaw it to
+  resume), which needs an API to step and resume a machine, not just a
+  list of frames; then rewind, from a ring of recent states; battery saves
+  of PRG-RAM, once a mapper has them.
+- **Maybe not**: CRT shaders and upscalers (darkening every other row at
+  3× gets most of the look); run-ahead; Game Genie codes.
+
 Later, maybe: PAL, more mappers.
