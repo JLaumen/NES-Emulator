@@ -40,15 +40,22 @@ Enhancements are not faithful to the console, but make games nicer to
 play; each is off unless its command-line option turns it on.
 
 - **Controls**: turbo buttons; gamepads (SDL's GameController); a second
-  controller.
-- **Picture**: fullscreen and integer scaling; screenshots; cropping the 8
-  overscan rows top and bottom; lifting the 8-sprites-a-scanline limit (no
-  flicker); a choice of palettes.
-- **Sound**: muting single channels.
-- **Time**: fast-forward (no pacing, only some frames drawn); save states
-  (freeze the state into a value, thaw it to resume), which needs an API
-  to step and resume a machine, not just a list of frames; then rewind,
-  from a ring of recent states.
+  controller; keys of one's own choosing.
+- **Picture**: fullscreen and integer scaling; the NES's wide pixels (8:7);
+  screenshots (SDL saves BMPs); cropping the 8 overscan rows top and
+  bottom; lifting the 8-sprites-a-scanline limit (no flicker); a choice of
+  palettes (`.pal` files); smooth scaling.
+- **Sound**: muting single channels; a volume; the console's other filters
+  (a second high-pass and a 14 kHz low-pass); the channels spread across
+  stereo.
+- **Time**: fast-forward (no pacing, only some frames drawn); slow motion;
+  frame advance while paused; a reset key; save states (freeze the state
+  into a value, thaw it to resume), which needs an API to step and resume
+  a machine, not just a list of frames; then rewind, from a ring of
+  recent states.
+- **Recording**: the game is a pure function of its inputs, so a list of
+  inputs is a replay (a movie) that plays back exactly; sound to a WAV
+  file; video through ffmpeg.
 - **Latency**: run-ahead, after save states: run a frame or two ahead
   with the buttons held now and show that, hiding the game's own lag.
   Frame delay (sleep after each refresh, then read the buttons and run
@@ -56,46 +63,88 @@ play; each is off unless its command-line option turns it on.
   window, the compositor composites about 8 ms before the refresh and
   misses some on its own, so it gained only 1–3 ms. Worth retrying in
   fullscreen or on X11.
-- **Maybe not**: CRT shaders and upscalers (`--crt`'s scanline gaps get
-  most of the look); Game Genie codes.
+- **Convenience**: dropping a ROM on the window loads it; the ROM's name
+  in the title; ROMs inside `.zip` files.
+- **Debugging**: with `--debug`, step an instruction or a scanline at a
+  time, breakpoints, and a disassembly around the PC.
+- **Maybe not**: CRT shaders and upscalers such as xBR (`--crt`'s scanline
+  gaps get most of the look); Game Genie codes; netplay (determinism and
+  save states make rollback possible, but it's a project of its own).
 
-Accuracy and coverage, when a game needs them: the known shortcuts below;
-band-limited sound synthesis (as blip_buf does), which would end the
-aliasing that averaging leaves; more mappers, with battery saves of
-PRG-RAM; PAL.
+Accuracy and coverage, when a game needs them:
+
+- More mappers: MMC1 (1), UxROM (2), CNROM (3) and MMC3 (4), with its
+  scanline IRQ, cover most of the library; AxROM (7) next, with
+  single-screen mirroring. A mapper is a cartridge's `load`, `store` and
+  `resolve`, plus a hook at each scanline.
+- PRG-RAM at $6000–$7FFF, with battery saves to a file beside the ROM.
+- NES 2.0 headers.
+- The PPU mask's greyscale and colour-emphasis bits; the sprite-overflow
+  flag; open-bus reads (the last value on the bus, not 0).
+- Band-limited sound synthesis (as blip_buf does), which would end the
+  aliasing that averaging leaves.
+- PAL, and Dendy.
+- Checks: blargg's CPU, PPU and APU test ROMs, which print their result;
+  nestest in CI, if its licence allows.
 
 Known shortcuts, to revisit if a game needs them: OAM DMA doesn't stall the
 CPU; enabling NMI during vblank doesn't raise one; the leftmost 8 pixels
 are never hidden; only controller 1 is connected; the DMC doesn't steal
 CPU cycles; the APU catches up once a scanline; averaging each sample
-(a box filter) leaves some aliasing, and noise isn't averaged.
+(a box filter) leaves some aliasing, and noise isn't averaged; unofficial
+opcodes are NOPs; mid-scanline writes to the PPU take effect from the
+next line.
 
 ## Optimisations
 
 A frame takes about 5.5 ms (a third of a core at 60 Hz), so none is
 needed yet; they would buy room for run-ahead and fast-forward, and fewer
-garbage-collector pauses. Profile first (`+RTS -p`, or the eventlog).
+garbage-collector pauses.
+
+Measure first: a `--bench` option that runs a ROM for a few thousand
+frames without a window, and prints the time a frame; then profile
+(`+RTS -p`, or the eventlog with `+RTS -l`).
 
 Doing less:
 
-- The bus marks every read and write in two 64 KB heat maps, and cools
-  and copies both each frame, all for `--debug`; do it only with
-  `--debug`.
+- Work for `--debug` only: the bus marks every read and write in two
+  64 KB heat maps, and cools and copies both each frame; the PPU copies
+  its 16 KB of memory each frame for the snapshot; the APU keeps every
+  channel's level at every sample for the oscilloscopes. Do all three
+  only with `--debug`.
+- The PPU: each pixel of the background looks up its tile, attribute and
+  pattern again; decode a tile's row once for its 8 pixels. Each pixel
+  searches the line's sprites; draw the sprites into a line buffer once
+  instead. Each pixel's colour goes through `resolve`; keep the palette
+  where it can be read directly.
+- The picture: `picture` builds its RGB bytes one at a time with `div`
+  and `mod`; write them three at a time into a buffer.
+- The CPU: whether an instruction takes the page-crossing cycle is a
+  search of a list on every instruction; make it part of the table.
+  `prgByte` takes a `mod` on every read where a mask would do.
 - The APU steps the noise's shift register one tick at a time; a table of
   its 32767- and 93-step sequences would jump straight there. Its tables
-  are lists indexed with `!!`, and it builds lists of levels to mix at
-  every step; arrays and unboxed values would do.
-- The PPU could decode a tile's row once for its 8 pixels, not per pixel.
-- The sound queue is a `Seq` of boxed `Float`s; a ring buffer of unboxed
-  ones would do.
+  are lists indexed with `!!`; arrays would do. It builds lists of levels
+  to mix at every step; unboxed values would do, and the mix itself is
+  two small lookup tables (31 and 203 entries), as nesdev describes.
+- The sound queue is a `Seq` of boxed `Float`s; SDL's own queue
+  (`SDL_QueueAudio`) would replace it and the callback, and be simpler.
+- Fast-forward needn't draw the frames it skips; the picture is already
+  lazy, but the PPU still renders every line.
 - Maybe not: skipping a CPU's idle loop while it waits for vblank is fast
   but needs per-game care.
 
 Without changing the algorithms:
 
-- GHC: try `-fllvm`; read the Core of the hot loops (CPU step, PPU line,
-  APU run) for boxing and missed specialisation, and add `INLINE`,
+- GHC: try `-fllvm`, `-fspecialise-aggressively` and
+  `-fexpose-all-unfoldings`; read the Core of the hot loops (CPU step, PPU
+  line, APU run) for boxing and missed specialisation, and add `INLINE`,
   `SPECIALISE` or strictness where it helps.
+- Allocation: the CPU's record is rebuilt with each instruction, and the
+  PPU's registers and the APU are records in `STRef`s, rebuilt with each
+  change; a worker-wrapped loop, unboxed mutable fields (`primitive`'s
+  `MutVar`s, or small unboxed arrays) and strict, unpacked fields
+  (`StrictData`) allocate less.
 - The runtime: a larger allocation area (`-with-rtsopts=-A64m`) means
   fewer collections; the non-moving collector shortens pauses, which can
   cost a refresh.
@@ -112,3 +161,10 @@ Without changing the algorithms:
     sprite-0 hit, which needs some pixels after all).
   - With run-ahead, run the frames ahead on another core alongside the
     real one.
+- The GPU already scales the picture to the window and draws it (SDL's
+  accelerated renderer). The emulation can't move there: it is one long
+  chain of steps, each needing the last, where a GPU is fast only at
+  many independent ones. Only per-pixel work could: the palette lookup
+  (send 61 KB of colour indices a frame, not 184 KB of RGB) and CRT
+  effects in a shader. SDL2's renderer has no shaders, so that means
+  OpenGL directly, for little gain; worth it only with real CRT shaders.
