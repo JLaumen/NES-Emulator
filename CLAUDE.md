@@ -6,8 +6,8 @@ Simplest means the implementation, not the features: enhancements that
 make games nicer to play (pause, save states, no sprite flicker, …) are
 welcome, even when the console couldn't do them. Each is off unless its
 command-line option turns it on, like `--debug`, `--vsync`, `--pause`,
-`--crt`, `--no-flicker`, `--fullscreen`, `--wide`, `--smooth`, `--ghost`
-and `--palette`.
+`--crt`, `--mask`, `--no-flicker`, `--fullscreen`, `--wide`, `--smooth`,
+`--ghost` and `--palette`.
 
 - Scope: NTSC NES: 6502 CPU, PPU, APU, controller, mappers 0 and 4, plus
   enhancements (see PLAN.md).
@@ -23,6 +23,8 @@ and `--palette`.
   slower against the sound card to keep the sound queue level; with
   `--pause`, Escape pauses and resumes; with `--crt`, the bottom of every
   three rows of the 3× picture is darker, like a CRT's scanline gaps;
+  with `--mask`, the three columns of each 3× pixel are tinted red, green
+  and blue, like a CRT's phosphor stripes (an aperture grille);
   with `--no-flicker`, the PPU draws up to 64 sprites a scanline, not 8;
   `--fullscreen` fills the screen; `--wide` makes pixels 8:7; with
   `--smooth`, the 3× picture is scaled to the window linearly, not by

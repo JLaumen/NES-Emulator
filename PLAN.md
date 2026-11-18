@@ -47,6 +47,8 @@ Each step ends with something we can check.
 19. [x] **MMC3**: mapper 4, with bank switching, mirroring, PRG RAM at
     $6000 and the scanline IRQ, counted at dot 260 of each rendered line.
     Check: Super Mario Bros. 3 plays, its status bar steady.
+20. [x] **Shadow mask**: `--mask` tints the three columns of each 3×
+    pixel red, green and blue, like a CRT's phosphor stripes.
 
 ## Next
 
@@ -59,8 +61,7 @@ play; each is off unless its command-line option turns it on.
   held, for recordings and streams.
 - **Picture**: integer scaling; screenshots (SDL saves BMPs); cropping the
   8 overscan rows top and bottom; colour emphasis (with 512-colour
-  `.pal` files); a shadow mask for
-  `--crt`, tinting the three columns of each 3× pixel red, green and blue;
+  `.pal` files);
   Scale3x (AdvMAME3x), which rounds diagonals from each pixel's four
   neighbours and fits the 3× picture exactly; NTSC composite colour
   bleeding (a horizontal blur of the signal, as blargg's nes_ntsc does);

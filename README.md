@@ -34,7 +34,8 @@ display does instead, in step with its refreshes: perfectly smooth on a
 With `--pause`, Escape pauses and resumes the game.
 
 With `--crt`, the picture has dark gaps between its rows, like an old TV's
-scanlines.
+scanlines. With `--mask`, each pixel shows as red, green and blue stripes,
+like the phosphors of an old TV's screen up close.
 
 With `--no-flicker`, every sprite on a line is drawn, not just the first
 eight the NES could, so games no longer flicker when sprites crowd a line.

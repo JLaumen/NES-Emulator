@@ -39,6 +39,7 @@ main = do
                   vsync = on "--vsync",
                   pause = on "--pause",
                   crt = on "--crt",
+                  mask = on "--mask",
                   noFlicker = on "--no-flicker",
                   fullscreen = on "--fullscreen",
                   wide = on "--wide",
@@ -49,7 +50,7 @@ main = do
     _ -> die ("usage: nes " ++ unwords ["[" ++ flag ++ "]" | flag <- flags] ++ " [--palette <file.pal>] <rom.nes> | nes --nestest <rom.nes>")
 
 flags :: [String]
-flags = ["--debug", "--vsync", "--pause", "--crt", "--no-flicker", "--fullscreen", "--wide", "--smooth", "--ghost"]
+flags = ["--debug", "--vsync", "--pause", "--crt", "--mask", "--no-flicker", "--fullscreen", "--wide", "--smooth", "--ghost"]
 
 -- | The value of the option given as @name value@, if any, and the other
 -- arguments.
@@ -58,7 +59,7 @@ valued name (option : value : rest) | option == name = (Just value, rest)
 valued name (arg : rest) = (arg :) <$> valued name rest
 valued _ [] = (Nothing, [])
 
-data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth, ghost :: Bool, palette :: Palette}
+data Options = Options {debug, vsync, pause, crt, mask, noFlicker, fullscreen, wide, smooth, ghost :: Bool, palette :: Palette}
 
 load :: (BS.ByteString -> Either String a) -> FilePath -> IO a
 load parse file = BS.readFile file >>= either (die . (("nes: " ++ file ++ ": ") ++)) pure . parse
@@ -72,9 +73,11 @@ load parse file = BS.readFile file >>= either (die . (("nes: " ++ file ++ ": ") 
 -- visuals of what the emulator is doing go beside the game. (In a window
 -- of their own, they would upset the vsync.) With pause on, Escape pauses
 -- and resumes the game. With crt on, the bottom of every three rows is
--- darker, like the gaps between a CRT's scanlines. With no-flicker on,
--- every sprite on a scanline is drawn, not just the first eight, so games
--- needn't take turns drawing them. With fullscreen on, the window fills
+-- darker, like the gaps between a CRT's scanlines. With mask on, the three
+-- columns of every 3× pixel are tinted red, green and blue, like a CRT's
+-- phosphor stripes. With no-flicker on, every sprite on a scanline is
+-- drawn, not just the first eight, so games needn't take turns drawing
+-- them. With fullscreen on, the window fills
 -- the screen. With wide on, the NES's pixels are wider than tall, 8:7, as
 -- on a TV. With smooth on, the picture is scaled smoothly from three times
 -- the NES's resolution, so its pixels look even at any size. With ghost
@@ -103,6 +106,9 @@ play options cart = do
       size = SDL.V2 (if options.debug then across + w else across) height
       game = SDL.Rectangle (SDL.P (SDL.V2 0 ((height - 720) `div` 2))) (SDL.V2 across 720)
       gaps = SV.generate 240 (\row -> SDL.Rectangle (SDL.P (SDL.V2 0 (3 * fromIntegral row + 2))) (SDL.V2 768 1))
+      -- Each column multiplies the picture by its colour, so most of a
+      -- channel shows only in its own column, as through an aperture grille.
+      stripes = [(colour, SV.generate 256 (\x -> SDL.Rectangle (SDL.P (SDL.V2 (3 * fromIntegral x + i) 0)) (SDL.V2 1 720))) | (i, colour) <- zip [0 ..] [SDL.V4 255 160 160 255, SDL.V4 160 255 160 255, SDL.V4 160 160 255 255]]
       beside = SDL.Rectangle (SDL.P (SDL.V2 across 0)) (SDL.V2 w h)
   window <-
     SDL.createWindow
@@ -138,6 +144,10 @@ play options cart = do
         when options.crt $ do
           SDL.rendererDrawColor renderer SDL.$= SDL.V4 0 0 0 128
           SDL.fillRects renderer gaps
+        when options.mask $ do
+          SDL.rendererDrawBlendMode renderer SDL.$= SDL.BlendMod
+          sequence_ [(SDL.rendererDrawColor renderer SDL.$= colour) >> SDL.fillRects renderer columns | (colour, columns) <- stripes]
+          SDL.rendererDrawBlendMode renderer SDL.$= SDL.BlendAlphaBlend
         SDL.rendererRenderTarget renderer SDL.$= Nothing
         SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
         SDL.clear renderer
