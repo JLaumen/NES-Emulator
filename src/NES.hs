@@ -65,11 +65,13 @@ visualsSize = (Visualise.width, Visualise.height)
 -- less sound, which then plays faster).
 data Input = Input {buttons :: [Button], speed :: Double}
 
--- | The frames a game shows, given the input for each. Each frame's input
--- is needed only once that frame is.
-frames :: Cartridge -> [Input] -> [Frame]
-frames cart inputs = Lazy.runST $ do
-  (bus, cpu) <- strictToLazyST (boot cart)
+-- | The frames a game shows, given the most sprites to draw on a scanline
+-- (8 on the console; 64 ends the flicker of games that take turns
+-- drawing more) and the input for each frame. Each frame's input is
+-- needed only once that frame is.
+frames :: Int -> Cartridge -> [Input] -> [Frame]
+frames spriteLimit cart inputs = Lazy.runST $ do
+  (bus, cpu) <- strictToLazyST (boot spriteLimit cart)
   let run _ [] = pure []
       run state (input : rest) = do
         (state', out) <- strictToLazyST $ do
@@ -86,9 +88,9 @@ frames cart inputs = Lazy.runST $ do
         (out :) <$> run state' rest
   run cpu inputs
 
-boot :: Cartridge -> ST s (Bus s, CPU)
-boot cart = do
-  bus <- Bus.new cart (APU.new cpuRate (fromIntegral sampleRate))
+boot :: Int -> Cartridge -> ST s (Bus s, CPU)
+boot spriteLimit cart = do
+  bus <- Bus.new spriteLimit cart (APU.new cpuRate (fromIntegral sampleRate))
   cpu <- CPU.reset bus
   pure (bus, cpu)
 
@@ -113,7 +115,7 @@ frame bus start = foldM line start [-1 .. scanlines - 2]
 -- and runs for the 8991 lines of the reference nestest.log.
 nestest :: Cartridge -> [String]
 nestest cart = runST $ do
-  (bus, cpu) <- boot cart
+  (bus, cpu) <- boot 8 cart
   let run 0 _ = pure []
       run n state = (CPU.trace state :) <$> (CPU.step bus state >>= run (n - 1))
   run (8991 :: Int) cpu {pc = 0xC000}

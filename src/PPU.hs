@@ -44,18 +44,20 @@ data PPU s = PPU
     -- | Where each line of the picture started, in the 512×480 map of all
     -- four nametables.
     scrollX, scrollY :: STUArray s Int Int,
-    mirroring :: Mirroring
+    mirroring :: Mirroring,
+    -- | The most sprites drawn on a scanline: 8 on the console.
+    spriteLimit :: Int
   }
 
-new :: Cartridge -> ST s (PPU s)
-new cart = do
+new :: Int -> Cartridge -> ST s (PPU s)
+new spriteLimit cart = do
   regs <- newSTRef Registers {ctrl = 0, mask = 0, status = 0, v = 0, t = 0, fineX = 0, latch = False, buffer = 0, oamAddr = 0}
   memory <- newListArray (0, 0x3FFF) (BS.unpack cart.chr ++ repeat 0)
   oam <- newArray (0, 255) 0
   pixels <- newArray (0, 256 * 240 - 1) 0
   scrollX <- newArray (0, 239) 0
   scrollY <- newArray (0, 239) 0
-  pure PPU {regs, memory, oam, pixels, scrollX, scrollY, mirroring = cart.mirroring}
+  pure PPU {regs, memory, oam, pixels, scrollX, scrollY, mirroring = cart.mirroring, spriteLimit}
 
 -- | Map an address onto the memory that backs it: nametables onto two
 -- through mirroring, and the background colour of the sprite palettes onto
@@ -201,11 +203,11 @@ data Sprite = Sprite
     planes :: (Word8, Word8)
   }
 
--- | The first eight sprites on a scanline, front to back.
+-- | The first sprites on a scanline, up to the limit, front to back.
 spritesOn :: PPU s -> Registers -> Int -> ST s [Sprite]
 spritesOn ppu r y = do
   rows <- forM [0 .. 63] $ \i -> (i,) . (\top -> y - fromIntegral top - 1) <$> readArray ppu.oam (4 * i)
-  forM (take 8 [(i, row) | (i, row) <- rows, row >= 0, row < height]) $ \(i, row) -> do
+  forM (take ppu.spriteLimit [(i, row) | (i, row) <- rows, row >= 0, row < height]) $ \(i, row) -> do
     tile <- fromIntegral <$> readArray ppu.oam (4 * i + 1)
     attributes <- readArray ppu.oam (4 * i + 2)
     x <- readArray ppu.oam (4 * i + 3)

@@ -33,6 +33,9 @@ Each step ends with something we can check.
     pulse).
 14. [x] **CRT look**: `--crt` darkens the bottom of every three rows of
     the 3× picture, as gaps between scanlines.
+15. [x] **No flicker**: `--no-flicker` draws every sprite on a scanline,
+    not just the first eight, so games that take turns drawing them
+    don't flicker.
 
 ## Next
 
@@ -43,8 +46,7 @@ play; each is off unless its command-line option turns it on.
   controller; keys of one's own choosing.
 - **Picture**: fullscreen and integer scaling; the NES's wide pixels (8:7);
   screenshots (SDL saves BMPs); cropping the 8 overscan rows top and
-  bottom; lifting the 8-sprites-a-scanline limit (no flicker); a choice of
-  palettes (`.pal` files); smooth scaling.
+  bottom; a choice of palettes (`.pal` files); smooth scaling.
 - **Sound**: muting single channels; a volume; the console's other filters
   (a second high-pass and a 14 kHz low-pass); the channels spread across
   stereo.

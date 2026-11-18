@@ -35,6 +35,9 @@ With `--pause`, Escape pauses and resumes the game.
 With `--crt`, the picture has dark gaps between its rows, like an old TV's
 scanlines.
 
+With `--no-flicker`, every sprite on a line is drawn, not just the first
+eight the NES could, so games no longer flicker when sprites crowd a line.
+
 The options combine, as in `cabal run nes -- --debug --vsync game.nes`.
 
 The CPU passes nestest's official-opcode tests

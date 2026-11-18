@@ -30,10 +30,10 @@ data Bus s = Bus
     readHeat, writeHeat :: STUArray s Word16 Word8
   }
 
-new :: Cartridge -> APU -> ST s (Bus s)
-new cart apu0 = do
+new :: Int -> Cartridge -> APU -> ST s (Bus s)
+new spriteLimit cart apu0 = do
   ram <- newArray (0, 0x7FF) 0
-  ppu <- PPU.new cart
+  ppu <- PPU.new spriteLimit cart
   apu <- newSTRef apu0
   controller <- Controller.new
   readHeat <- newArray (0, 0xFFFF) 0

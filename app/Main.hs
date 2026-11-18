@@ -29,12 +29,12 @@ main = do
   case args of
     ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
     _
-      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause", "--crt"]) args,
+      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause", "--crt", "--no-flicker"]) args,
         let on flag = flag `elem` flags ->
-          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause", crt = on "--crt"}
-    _ -> die "usage: nes [--debug] [--vsync] [--pause] [--crt] <rom.nes> | nes --nestest <rom.nes>"
+          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause", crt = on "--crt", noFlicker = on "--no-flicker"}
+    _ -> die "usage: nes [--debug] [--vsync] [--pause] [--crt] [--no-flicker] <rom.nes> | nes --nestest <rom.nes>"
 
-data Options = Options {debug, vsync, pause, crt :: Bool}
+data Options = Options {debug, vsync, pause, crt, noFlicker :: Bool}
 
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
@@ -48,7 +48,9 @@ load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 -- visuals of what the emulator is doing go beside the game. (In a window
 -- of their own, they would upset the vsync.) With pause on, Escape pauses
 -- and resumes the game. With crt on, the bottom of every three rows is
--- darker, like the gaps between a CRT's scanlines.
+-- darker, like the gaps between a CRT's scanlines. With no-flicker on,
+-- every sprite on a scanline is drawn, not just the first eight, so games
+-- needn't take turns drawing them.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -119,7 +121,7 @@ play options cart = do
             when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
             run (count - 1) buttons rest
           [] -> pure Nothing
-  loop False 0 . frames cart =<< getChanContents inputs
+  loop False 0 . frames (if options.noFlicker then 64 else 8) cart =<< getChanContents inputs
   SDL.closeAudioDevice device
   SDL.quit
 
