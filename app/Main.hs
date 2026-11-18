@@ -29,28 +29,45 @@ main = do
   case args of
     ["--nestest", rom] -> load rom >>= mapM_ putStrLn . nestest
     _
-      | (flags, [rom]) <- partition (`elem` ["--debug", "--vsync", "--pause", "--crt", "--no-flicker"]) args,
-        let on flag = flag `elem` flags ->
-          load rom >>= play Options {debug = on "--debug", vsync = on "--vsync", pause = on "--pause", crt = on "--crt", noFlicker = on "--no-flicker"}
-    _ -> die "usage: nes [--debug] [--vsync] [--pause] [--crt] [--no-flicker] <rom.nes> | nes --nestest <rom.nes>"
+      | (given, [rom]) <- partition (`elem` flags) args,
+        let on flag = flag `elem` given ->
+          load rom
+            >>= play
+              Options
+                { debug = on "--debug",
+                  vsync = on "--vsync",
+                  pause = on "--pause",
+                  crt = on "--crt",
+                  noFlicker = on "--no-flicker",
+                  fullscreen = on "--fullscreen",
+                  wide = on "--wide",
+                  smooth = on "--smooth"
+                }
+    _ -> die ("usage: nes " ++ unwords ["[" ++ flag ++ "]" | flag <- flags] ++ " <rom.nes> | nes --nestest <rom.nes>")
 
-data Options = Options {debug, vsync, pause, crt, noFlicker :: Bool}
+flags :: [String]
+flags = ["--debug", "--vsync", "--pause", "--crt", "--no-flicker", "--fullscreen", "--wide", "--smooth"]
+
+data Options = Options {debug, vsync, pause, crt, noFlicker, fullscreen, wide, smooth :: Bool}
 
 load :: FilePath -> IO Cartridge
 load rom = BS.readFile rom >>= either (die . ("nes: " ++)) pure . parseCartridge
 
--- | Play the game in a window, at three times the NES's resolution. The
--- sound goes through a queue that the audio device empties at its own
--- pace, and that queue paces the game: each frame waits for it to run low.
--- With vsync on, the screen paces the game instead: each refresh runs the
--- frames due by then, so the game keeps its speed at any refresh rate and
--- is smoothest at 60 or 120 Hz. With debug on, the
+-- | Play the game in a window, at three times the NES's resolution or
+-- scaled to fit it. The sound goes through a queue that the audio device
+-- empties at its own pace, and that queue paces the game: each frame waits
+-- for it to run low. With vsync on, the screen paces the game instead:
+-- each refresh runs the frames due by then, so the game keeps its speed at
+-- any refresh rate and is smoothest at 60 or 120 Hz. With debug on, the
 -- visuals of what the emulator is doing go beside the game. (In a window
 -- of their own, they would upset the vsync.) With pause on, Escape pauses
 -- and resumes the game. With crt on, the bottom of every three rows is
 -- darker, like the gaps between a CRT's scanlines. With no-flicker on,
 -- every sprite on a scanline is drawn, not just the first eight, so games
--- needn't take turns drawing them.
+-- needn't take turns drawing them. With fullscreen on, the window fills
+-- the screen. With wide on, the NES's pixels are wider than tall, 8:7, as
+-- on a TV. With smooth on, the picture is scaled smoothly from three times
+-- the NES's resolution, so its pixels look even at any size.
 play :: Options -> Cartridge -> IO ()
 play options cart = do
   SDL.initialize [SDL.InitVideo, SDL.InitAudio]
@@ -68,29 +85,45 @@ play options cart = do
         }
   SDL.setAudioDevicePlaybackState device SDL.Play
   let (w, h) = visualsSize
+      across = if options.wide then 878 else 768 -- 768 × 8/7, if wide
       height = if options.debug then max 720 h else 720
-      size = SDL.V2 (if options.debug then 768 + w else 768) height
-      top = (height - 720) `div` 2
-      game = SDL.Rectangle (SDL.P (SDL.V2 0 top)) (SDL.V2 768 720)
-      gaps = SV.generate 240 (\row -> fromIntegral <$> SDL.Rectangle (SDL.P (SDL.V2 0 (top + 3 * row + 2))) (SDL.V2 768 1))
-      beside = SDL.Rectangle (SDL.P (SDL.V2 768 0)) (SDL.V2 w h)
-  window <- SDL.createWindow "nes" SDL.defaultWindow {SDL.windowInitialSize = fromIntegral <$> size, SDL.windowResizable = True}
+      size = SDL.V2 (if options.debug then across + w else across) height
+      game = SDL.Rectangle (SDL.P (SDL.V2 0 ((height - 720) `div` 2))) (SDL.V2 across 720)
+      gaps = SV.generate 240 (\row -> SDL.Rectangle (SDL.P (SDL.V2 0 (3 * fromIntegral row + 2))) (SDL.V2 768 1))
+      beside = SDL.Rectangle (SDL.P (SDL.V2 across 0)) (SDL.V2 w h)
+  window <-
+    SDL.createWindow
+      "nes"
+      SDL.defaultWindow
+        { SDL.windowInitialSize = fromIntegral <$> size,
+          SDL.windowResizable = True,
+          SDL.windowMode = if options.fullscreen then SDL.FullscreenDesktop else SDL.Windowed
+        }
+  when options.fullscreen (SDL.cursorVisible SDL.$= False)
   renderer <- SDL.createRenderer window (-1) SDL.defaultRenderer {SDL.rendererType = if options.vsync then SDL.AcceleratedVSyncRenderer else SDL.AcceleratedRenderer}
   -- Draw at this size whatever the window's, with bars around if need be.
   SDL.rendererLogicalSize renderer SDL.$= Just (fromIntegral <$> size)
   SDL.rendererDrawBlendMode renderer SDL.$= SDL.BlendAlphaBlend
   texture <- SDL.createTexture renderer SDL.RGB24 SDL.TextureAccessStreaming (SDL.V2 256 240)
+  -- The picture at three times the NES's resolution, with the CRT's gaps,
+  -- before it's scaled to the window: smoothly, it blends only where its
+  -- big pixels meet, so they stay sharp.
+  screen <- SDL.createTexture renderer SDL.RGB888 SDL.TextureAccessTarget (SDL.V2 768 720)
+  SDL.textureScaleMode screen SDL.$= if options.smooth then SDL.ScaleModeLinear else SDL.ScaleModeNearest
   visuals <- SDL.createTexture renderer SDL.RGB888 SDL.TextureAccessStreaming (fromIntegral <$> SDL.V2 w h)
   -- The core reads the buttons for each frame lazily from this channel, so
   -- they must be in it before the frame is drawn.
   inputs <- newChan
   let draw = do
-        SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
-        SDL.clear renderer
-        SDL.copy renderer texture Nothing (Just (fromIntegral <$> game))
+        SDL.rendererRenderTarget renderer SDL.$= Just screen
+        SDL.copy renderer texture Nothing Nothing
         when options.crt $ do
           SDL.rendererDrawColor renderer SDL.$= SDL.V4 0 0 0 128
           SDL.fillRects renderer gaps
+        SDL.rendererRenderTarget renderer SDL.$= Nothing
+        SDL.rendererDrawColor renderer SDL.$= SDL.V4 14 16 22 255
+        SDL.clear renderer
+        SDL.copy renderer screen Nothing (Just (fromIntegral <$> game))
         when options.debug (SDL.copy renderer visuals Nothing (Just (fromIntegral <$> beside)))
         SDL.present renderer -- with vsync, waits for the refresh
       loop paused owed outputs = do

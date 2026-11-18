@@ -36,6 +36,9 @@ Each step ends with something we can check.
 15. [x] **No flicker**: `--no-flicker` draws every sprite on a scanline,
     not just the first eight, so games that take turns drawing them
     don't flicker.
+16. [x] **Picture**: `--fullscreen`; `--wide` for the NES's 8:7 pixels;
+    `--smooth` scales the 3× picture to the window linearly (sharp
+    bilinear), so pixels look even at any size without blurring.
 
 ## Next
 
@@ -44,9 +47,8 @@ play; each is off unless its command-line option turns it on.
 
 - **Controls**: turbo buttons; gamepads (SDL's GameController); a second
   controller; keys of one's own choosing.
-- **Picture**: fullscreen and integer scaling; the NES's wide pixels (8:7);
-  screenshots (SDL saves BMPs); cropping the 8 overscan rows top and
-  bottom; a choice of palettes (`.pal` files); smooth scaling.
+- **Picture**: integer scaling; screenshots (SDL saves BMPs); cropping the
+  8 overscan rows top and bottom; a choice of palettes (`.pal` files).
 - **Sound**: muting single channels; a volume; the console's other filters
   (a second high-pass and a 14 kHz low-pass); the channels spread across
   stereo.

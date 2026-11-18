@@ -38,6 +38,11 @@ scanlines.
 With `--no-flicker`, every sprite on a line is drawn, not just the first
 eight the NES could, so games no longer flicker when sprites crowd a line.
 
+With `--fullscreen`, the game fills the screen. With `--wide`, its pixels
+are a little wider than tall (8:7), as on a TV. With `--smooth`, the
+picture scales smoothly, so its pixels look even at any size, without
+blurring.
+
 The options combine, as in `cabal run nes -- --debug --vsync game.nes`.
 
 The CPU passes nestest's official-opcode tests
