@@ -14,8 +14,10 @@ import Data.Array.Unboxed (UArray, listArray, (!))
 import Data.Bits (clearBit, complement, setBit, shiftL, shiftR, testBit, xor, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Internal qualified as BS (unsafeCreate)
 import Data.STRef (STRef, modifySTRef', newSTRef, readSTRef, writeSTRef)
 import Data.Word (Word16, Word32, Word8)
+import Foreign (pokeByteOff)
 import Mapper (Mapper)
 import Mapper qualified
 
@@ -179,32 +181,41 @@ render ppu y = do
   writeArray ppu.scrollX y (fromIntegral ((r.v .&. 0x1F) * 8 + fromIntegral r.fineX + (r.v .&. 0x400) `shiftR` 2))
   writeArray ppu.scrollY y (fromIntegral ((r.v `shiftR` 5 .&. 0x1F) * 8 + r.v `shiftR` 12 .&. 7) + if testBit r.v 11 then 240 else 0)
   sprites <- if testBit r.mask 4 then spritesOn ppu r y else pure []
+  if testBit r.mask 3 then forM_ [0 .. 32] (background ppu r y) else forM_ [0 .. 255] $ \x -> writeArray ppu.pixels (y * 256 + x) 0
+  -- Sprites in front claim their pixels, marked with bit 5, from those
+  -- behind.
+  forM_ sprites $ \s -> forM_ [max 0 s.x .. min 255 (s.x + 7)] $ \x -> do
+    let c = spritePixel s x
+    back <- readArray ppu.pixels (y * 256 + x)
+    when (c /= 0 && not (testBit back 5)) $ do
+      -- Games time mid-frame effects, such as a fixed status bar, by
+      -- when sprite 0 first overlaps the background.
+      when (s.index == 0 && back /= 0 && x < 255) $
+        modifySTRef' ppu.regs (\r' -> r' {status = setBit r'.status 6})
+      writeArray ppu.pixels (y * 256 + x) (setBit (if back /= 0 && testBit s.attributes 5 then back else 0x10 .|. fromIntegral c) 5)
   forM_ [0 .. 255] $ \x -> do
-    back <- if testBit r.mask 3 then background ppu r x else pure 0
-    color <- case [(s, c) | s <- sprites, let c = spritePixel s x, c /= 0] of
-      (s, c) : _ -> do
-        -- Games time mid-frame effects, such as a fixed status bar, by
-        -- when sprite 0 first overlaps the background.
-        when (s.index == 0 && back /= 0 && x < 255) $
-          modifySTRef' ppu.regs (\r' -> r' {status = setBit r'.status 6})
-        pure (if back /= 0 && testBit s.attributes 5 then back else 0x10 .|. c)
-      [] -> pure back
-    peek ppu (0x3F00 + color) >>= writeArray ppu.pixels (y * 256 + x)
+    color <- readArray ppu.pixels (y * 256 + x)
+    -- The palette doesn't depend on the mirroring.
+    readArray ppu.memory (resolve Vertical (0x3F00 + fromIntegral (color .&. 0x1F))) >>= writeArray ppu.pixels (y * 256 + x)
 
--- | The background's palette entry (0–15) at pixel x of the row that v
--- points at.
-background :: PPU s -> Registers -> Int -> ST s Word16
-background ppu r x = do
+-- | Draw one tile of the background's row, the tile at screen column
+-- i (0–32, counting from the scroll's tile), as palette entries (0–15)
+-- in the picture's row y; the part off the edges is left out.
+background :: PPU s -> Registers -> Int -> Int -> ST s ()
+background ppu r y i = do
   tile <- peek ppu (0x2000 .|. nametable .|. row `shiftL` 5 .|. column)
   attribute <- peek ppu (0x23C0 .|. nametable .|. (row `shiftR` 2) `shiftL` 3 .|. column `shiftR` 2)
   planes <- patternRow ppu ((if testBit r.ctrl 4 then 0x1000 else 0) + fromIntegral tile * 16 + r.v `shiftR` 12)
   let palette = fromIntegral (attribute `shiftR` fromIntegral ((row .&. 2) `shiftL` 1 .|. column .&. 2)) .&. 3
-  pure (shade palette planes (fromIntegral (px .&. 7)))
+  forM_ [max 0 (-left) .. min 7 (255 - left)] $ \dx ->
+    writeArray ppu.pixels (y * 256 + left + dx) (fromIntegral (shade palette planes dx))
   where
-    px = (r.v .&. 0x1F) * 8 + fromIntegral r.fineX + fromIntegral x
+    -- The tile's first pixel, which for the first tile lies off the left.
+    left = 8 * i - fromIntegral r.fineX
+    tx = (r.v .&. 0x1F) + fromIntegral i
     -- Past the right edge of a nametable lies the next one across.
-    nametable = r.v .&. 0x0C00 `xor` (px .&. 0x100) `shiftL` 2
-    column = (px `shiftR` 3) .&. 0x1F
+    nametable = r.v .&. 0x0C00 `xor` (tx .&. 0x20) `shiftL` 5
+    column = tx .&. 0x1F
     row = (r.v `shiftR` 5) .&. 0x1F
 
 data Sprite = Sprite
@@ -261,8 +272,10 @@ shade palette (lo, hi) i
 picture :: forall s. Palette -> PPU s -> ST s ByteString
 picture colors ppu = do
   indices <- freeze ppu.pixels :: ST s (UArray Int Word8)
-  let byte i = colors ! (3 * fromIntegral (indices ! (i `div` 3) .&. 0x3F) + i `mod` 3)
-  pure (fst (BS.unfoldrN (3 * 256 * 240) (\i -> Just (byte i, i + 1)) 0))
+  pure $ BS.unsafeCreate (3 * 256 * 240) $ \out ->
+    forM_ [0 .. 256 * 240 - 1] $ \i -> do
+      let color = 3 * fromIntegral (indices ! i .&. 0x3F)
+      forM_ [0 .. 2] $ \c -> pokeByteOff out (3 * i + c) (colors ! (color + c))
 
 -- | What the PPU holds, for a look inside.
 data Video = Video

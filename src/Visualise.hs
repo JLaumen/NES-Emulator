@@ -75,15 +75,21 @@ nametables :: Canvas s -> Video -> UArray Int Color -> Int -> Int -> ST s ()
 nametables c v colors x y = do
   title c x y "NAMETABLES"
   frame c x (y + 24) 512 480
-  forM_ [0 .. 3] $ \n -> forM_ [0 .. 29] $ \row -> forM_ [0 .. 31] $ \col -> do
-    let base = 0x2000 + 0x400 * fromIntegral n
-        at = fromIntegral (row * 32 + col)
-        tile = v.memory ! (base + at)
-        attribute = v.memory ! (base + 0x3C0 + fromIntegral (row `div` 4 * 8 + col `div` 4))
-        palette = fromIntegral (attribute `shiftR` ((row .&. 2) `shiftL` 1 .|. col .&. 2)) .&. 3
-        table = if testBit v.ctrl 4 then 0x1000 else 0
-    drawTile c v (x + n `mod` 2 * 256 + col * 8) (y + 24 + n `div` 2 * 240 + row * 8) 1 (table + fromIntegral tile * 16) False False $
-      \p -> Just (colors ! (palette * 4 + p))
+  let base n = 0x2000 + 0x400 * fromIntegral n
+      left n = x + n `mod` 2 * 256
+      top n = y + 24 + n `div` 2 * 240
+      same m n = all (\i -> v.memory ! (base m + i) == v.memory ! (base n + i)) [0 .. 0x3FF]
+  forM_ [0 .. 3 :: Int] $ \n -> case filter (`same` n) [0 .. n - 1] of
+    -- Mirroring makes most nametables a copy of another.
+    m : _ -> copy c (left m) (top m) (left n) (top n) 256 240
+    [] -> forM_ [0 .. 29] $ \row -> forM_ [0 .. 31] $ \col -> do
+      let at = fromIntegral (row * 32 + col)
+          tile = v.memory ! (base n + at)
+          attribute = v.memory ! (base n + 0x3C0 + fromIntegral (row `div` 4 * 8 + col `div` 4))
+          palette = fromIntegral (attribute `shiftR` ((row .&. 2) `shiftL` 1 .|. col .&. 2)) .&. 3
+          table = if testBit v.ctrl 4 then 0x1000 else 0
+      drawTile c v (left n + col * 8) (top n + row * 8) 1 (table + fromIntegral tile * 16) False False False $
+        \p -> colors ! (palette * 4 + p)
   -- Outline the part on screen, line by line, so that split screens show
   -- each part where it is.
   let at line' = (v.scrollX ! line' `mod` 512, v.scrollY ! line' `mod` 480)
@@ -105,8 +111,8 @@ patternTables c v colors x y = do
   forM_ [0 .. 1] $ \t -> forM_ [0 .. 255] $ \i -> do
     -- Each table in the colours of whatever it's used for.
     let palette = if fromEnum (testBit v.ctrl 3) == t then 4 else 0
-    drawTile c v (x + t * 256 + i `mod` 16 * 16) (y + 24 + i `div` 16 * 16) 2 (fromIntegral (t * 0x1000 + i * 16)) False False $
-      \p -> Just (colors ! (palette * 4 + p))
+    drawTile c v (x + t * 256 + i `mod` 16 * 16) (y + 24 + i `div` 16 * 16) 2 (fromIntegral (t * 0x1000 + i * 16)) False False False $
+      \p -> colors ! (palette * 4 + p)
 
 palettes :: Canvas s -> UArray Int Color -> Int -> Int -> ST s ()
 palettes c colors x y = do
@@ -136,8 +142,8 @@ sprites c v colors x y = do
     forM_ tiles $ \(t, k) -> do
       let dy = (if flipV && tall then 1 - k else k) * 16
           sy = cy + if tall then 3 else 11
-      drawTile c v (cx + 7) (sy + dy) 2 t flipH flipV $ \p ->
-        if p == 0 then Nothing else Just (shade (colors ! (palette * 4 + p)))
+      drawTile c v (cx + 7) (sy + dy) 2 t flipH flipV True $ \p ->
+        shade (colors ! (palette * 4 + p))
 
 sound :: Canvas s -> Snapshot -> Int -> Int -> ST s ()
 sound c s x y = do
@@ -222,6 +228,11 @@ rect (Canvas v) x y w h col = forM_ [max 0 y .. min height (y + h) - 1] $ \py ->
   where
     x' = max 0 x
 
+-- | Copy a w×h block of the canvas from one place to another.
+copy :: Canvas s -> Int -> Int -> Int -> Int -> Int -> Int -> ST s ()
+copy (Canvas v) fromX fromY toX toY w h = forM_ [0 .. h - 1] $ \row ->
+  MV.copy (MV.slice ((toY + row) * width + toX) w v) (MV.slice ((fromY + row) * width + fromX) w v)
+
 -- | A panel to draw on, with a thin border.
 frame :: Canvas s -> Int -> Int -> Int -> Int -> ST s ()
 frame c x y w h = rect c (x - 1) (y - 1) (w + 2) (h + 2) line >> rect c x y w h panel
@@ -236,18 +247,19 @@ text c x y col str = forM_ (zip [0 ..] str) $ \(k, ch) ->
     when (testBit bits (4 - b)) $ rect c (x + k * 12 + b * 2) (y + r * 2) 2 2 col
 
 -- | One 8×8 tile from the pattern tables at a scale, its pixels (0–3)
--- coloured by the given function, or left out.
+-- coloured by the given function, or left out where 0 if see-through.
 {-# INLINE drawTile #-}
-drawTile :: Canvas s -> Video -> Int -> Int -> Int -> Word16 -> Bool -> Bool -> (Int -> Maybe Color) -> ST s ()
-drawTile c v x y size addr flipH flipV colorOf = forM_ [0 .. 7] $ \row -> do
+drawTile :: Canvas s -> Video -> Int -> Int -> Int -> Word16 -> Bool -> Bool -> Bool -> (Int -> Color) -> ST s ()
+drawTile c v x y size addr flipH flipV seeThrough colorOf = forM_ [0 .. 7] $ \row -> do
   let lo = v.memory ! (addr + fromIntegral row)
       hi = v.memory ! (addr + fromIntegral row + 8)
   forM_ [0 .. 7] $ \col -> do
     let bit b = fromEnum (testBit b (7 - col))
         dx = if flipH then 7 - col else col
         dy = if flipV then 7 - row else row
-    forM_ (colorOf (bit lo .|. bit hi `shiftL` 1)) $
-      if size == 1 then pixel c (x + dx) (y + dy) else rect c (x + dx * size) (y + dy * size) size size
+        p = bit lo .|. bit hi `shiftL` 1
+    when (p /= 0 || not seeThrough) $
+      (if size == 1 then pixel c (x + dx) (y + dy) else rect c (x + dx * size) (y + dy * size) size size) (colorOf p)
 
 -- | Entry i (0–3) of palette p (0–3 background, 4–7 sprites), in RGB.
 color :: PPU.Palette -> Video -> Int -> Int -> Color

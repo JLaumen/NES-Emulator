@@ -51,7 +51,7 @@ new cart = do
 load :: Mapper s -> Word16 -> ST s Word8
 load m addr
   | addr < 0x8000 = readArray m.ram addr
-  | otherwise = (\bank -> inBank m.prg bank addr) <$> readArray m.prgBanks (bankOf addr)
+  | otherwise = readArray m.prgBanks (bankOf addr) >>= \bank -> pure $! inBank m.prg bank addr
 
 store :: Mapper s -> Word16 -> Word8 -> ST s ()
 store m addr value

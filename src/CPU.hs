@@ -3,13 +3,18 @@
 
 -- | The 6502 CPU (the NES's 2A03 without decimal mode), one instruction at a
 -- time. Cycles are counted per instruction, not emulated individually.
-module CPU (CPU (..), reset, step, nmi, irq, trace) where
+-- The registers are unboxed mutable variables, so running it allocates
+-- little; 'CPU' is a snapshot of them.
+module CPU (CPU (..), Registers (..), new, snapshot, reset, step, nmi, irq, trace) where
 
 import Bus (Bus, load, loadWord, store)
+import Control.Monad (unless, when)
 import Control.Monad.ST (ST)
 import Data.Array (Array, listArray, (!), (//))
 import Data.Bits (clearBit, complement, setBit, shiftL, shiftR, testBit, xor, (.&.), (.|.))
 import Data.Int (Int8)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar, readPrimVar, writePrimVar)
+import Data.Primitive.Types (Prim)
 import Data.Word (Word16, Word8)
 import Text.Printf (printf)
 
@@ -19,32 +24,52 @@ data CPU = CPU
     cycles :: !Int
   }
 
+data Registers s = Registers
+  { regA, regX, regY, regSP, regP :: PrimVar s Word8,
+    regPC :: PrimVar s Word16,
+    clock :: PrimVar s Int
+  }
+
+new :: CPU -> ST s (Registers s)
+new cpu = Registers <$> newPrimVar cpu.a <*> newPrimVar cpu.x <*> newPrimVar cpu.y <*> newPrimVar cpu.sp <*> newPrimVar cpu.p <*> newPrimVar cpu.pc <*> newPrimVar cpu.cycles
+
+snapshot :: Registers s -> ST s CPU
+snapshot r = CPU <$> readPrimVar r.regA <*> readPrimVar r.regX <*> readPrimVar r.regY <*> readPrimVar r.regSP <*> readPrimVar r.regP <*> readPrimVar r.regPC <*> readPrimVar r.clock
+
 reset :: Bus s -> ST s CPU
 reset bus = do
   pc <- loadWord bus 0xFFFC
   pure CPU {a = 0, x = 0, y = 0, sp = 0xFD, p = 0x24, pc, cycles = 7}
 
 -- | Answer a non-maskable interrupt, which the PPU raises at vblank.
-nmi :: Bus s -> CPU -> ST s CPU
-nmi bus cpu = interrupt bus 0xFFFA cpu.p cpu {cycles = cpu.cycles + 7}
+nmi :: Bus s -> Registers s -> ST s ()
+nmi bus r = do
+  modify r.clock (+ 7)
+  readPrimVar r.regP >>= interrupt bus r 0xFFFA
 
 -- | Answer an interrupt request, unless interrupts are disabled.
-irq :: Bus s -> CPU -> ST s CPU
-irq bus cpu
-  | testBit cpu.p interruptDisable = pure cpu
-  | otherwise = interrupt bus 0xFFFE cpu.p cpu {cycles = cpu.cycles + 7}
+irq :: Bus s -> Registers s -> ST s ()
+irq bus r = do
+  status <- readPrimVar r.regP
+  unless (testBit status interruptDisable) $ do
+    modify r.clock (+ 7)
+    interrupt bus r 0xFFFE status
 
 -- | Push PC and the given status, then jump through a vector.
-interrupt :: Bus s -> Word16 -> Word8 -> CPU -> ST s CPU
-interrupt bus vector status cpu = do
-  cpu' <- pushWord bus cpu.pc cpu >>= push bus status
-  target <- loadWord bus vector
-  pure (setFlag interruptDisable True cpu' {pc = target})
+interrupt :: Bus s -> Registers s -> Word16 -> Word8 -> ST s ()
+interrupt bus r vector status = do
+  readPrimVar r.regPC >>= pushWord bus r
+  push bus r status
+  loadWord bus vector >>= writePrimVar r.regPC
+  setFlag r interruptDisable True
 
 -- | One line per state, in the columns of nestest.log.
 trace :: CPU -> String
 trace cpu =
   printf "%04X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%d" cpu.pc cpu.a cpu.x cpu.y cpu.p cpu.sp cpu.cycles
+
+modify :: (Prim a) => PrimVar s a -> (a -> a) -> ST s ()
+modify v f = readPrimVar v >>= writePrimVar v . f
 
 -- * Instructions
 
@@ -186,32 +211,38 @@ instructions =
       ]
 
 -- | Execute the instruction at PC.
-step :: Bus s -> CPU -> ST s CPU
-step bus cpu = do
-  Instr op mode base <- (instructions !) <$> load bus cpu.pc
-  (addr, crossed) <- address bus cpu mode
+step :: Bus s -> Registers s -> ST s ()
+step bus r = do
+  pc <- readPrimVar r.regPC
+  Instr op mode base <- (instructions !) <$> load bus pc
+  (addr, crossed) <- address bus r pc mode
   -- Indexed reads take an extra cycle when they cross a page.
   let extra = fromEnum (crossed && op `elem` [ADC, AND, CMP, EOR, LDA, LDX, LDY, ORA, SBC])
-  execute bus op mode addr cpu {pc = cpu.pc + 1 + size mode, cycles = cpu.cycles + base + extra}
+      next = pc + 1 + size mode
+  writePrimVar r.regPC next
+  modify r.clock (+ (base + extra))
+  execute bus r op mode addr next
 
 -- | The operand's address, and whether indexing crossed a page.
-address :: Bus s -> CPU -> Mode -> ST s (Word16, Bool)
-address bus cpu = \case
+address :: Bus s -> Registers s -> Word16 -> Mode -> ST s (Word16, Bool)
+address bus r pc = \case
   Imp -> pure (0, False)
   Acc -> pure (0, False)
   Imm -> pure (at, False)
   Zp -> plain . fromIntegral <$> byte
-  ZpX -> plain . fromIntegral . (+ cpu.x) <$> byte
-  ZpY -> plain . fromIntegral . (+ cpu.y) <$> byte
+  ZpX -> (\i b -> plain (fromIntegral (b + i))) <$> readPrimVar r.regX <*> byte
+  ZpY -> (\i b -> plain (fromIntegral (b + i))) <$> readPrimVar r.regY <*> byte
   Abs -> plain <$> word
-  AbsX -> indexed cpu.x <$> word
-  AbsY -> indexed cpu.y <$> word
+  AbsX -> indexed <$> readPrimVar r.regX <*> word
+  AbsY -> indexed <$> readPrimVar r.regY <*> word
   Ind -> plain <$> (word >>= loadWordInPage bus)
-  IndX -> plain <$> (byte >>= loadWordInPage bus . fromIntegral . (+ cpu.x))
-  IndY -> indexed cpu.y <$> (byte >>= loadWordInPage bus . fromIntegral)
+  IndX -> do
+    i <- readPrimVar r.regX
+    plain <$> (byte >>= loadWordInPage bus . fromIntegral . (+ i))
+  IndY -> indexed <$> readPrimVar r.regY <*> (byte >>= loadWordInPage bus . fromIntegral)
   Rel -> plain . (\offset -> at + 1 + fromIntegral (fromIntegral offset :: Int8)) <$> byte
   where
-    at = cpu.pc + 1
+    at = pc + 1
     byte = load bus at
     word = loadWord bus at
     plain addr = (addr, False)
@@ -223,108 +254,125 @@ loadWordInPage :: Bus s -> Word16 -> ST s Word16
 loadWordInPage bus addr = do
   lo <- load bus addr
   hi <- load bus (addr .&. 0xFF00 .|. (addr + 1) .&. 0x00FF)
-  pure (fromIntegral hi `shiftL` 8 .|. fromIntegral lo)
+  pure $! fromIntegral hi `shiftL` 8 .|. fromIntegral lo
 
 page :: Word16 -> Word16
 page = (`shiftR` 8)
 
-execute :: Bus s -> Op -> Mode -> Word16 -> CPU -> ST s CPU
-execute bus op mode addr cpu = case op of
-  LDA -> withValue setA
-  LDX -> withValue setX
-  LDY -> withValue setY
-  STA -> cpu <$ store bus addr cpu.a
-  STX -> cpu <$ store bus addr cpu.x
-  STY -> cpu <$ store bus addr cpu.y
-  TAX -> pure (setX cpu.a)
-  TAY -> pure (setY cpu.a)
-  TXA -> pure (setA cpu.x)
-  TYA -> pure (setA cpu.y)
-  TSX -> pure (setX cpu.sp)
-  TXS -> pure cpu {sp = cpu.x}
-  ADC -> withValue add
-  SBC -> withValue (add . complement)
-  AND -> withValue (setA . (cpu.a .&.))
-  ORA -> withValue (setA . (cpu.a .|.))
-  EOR -> withValue (setA . xor cpu.a)
-  CMP -> withValue (compareWith cpu.a)
-  CPX -> withValue (compareWith cpu.x)
-  CPY -> withValue (compareWith cpu.y)
-  BIT -> withValue $ \v -> setFlag zero (cpu.a .&. v == 0) cpu {p = cpu.p .&. 0x3F .|. v .&. 0xC0}
-  INC -> modify (+ 1)
-  DEC -> modify (subtract 1)
-  INX -> pure (setX (cpu.x + 1))
-  INY -> pure (setY (cpu.y + 1))
-  DEX -> pure (setX (cpu.x - 1))
-  DEY -> pure (setY (cpu.y - 1))
-  ASL -> shift (`shiftL` 1) 7
-  LSR -> shift (`shiftR` 1) 0
-  ROL -> shift (\v -> v `shiftL` 1 .|. carryIn) 7
-  ROR -> shift (\v -> v `shiftR` 1 .|. carryIn `shiftL` 7) 0
-  BCC -> branch (not (flag carry))
+-- | Run an operation, given its operand's address and the PC after it.
+execute :: Bus s -> Registers s -> Op -> Mode -> Word16 -> Word16 -> ST s ()
+execute bus r op mode addr pc = case op of
+  LDA -> value >>= setA
+  LDX -> value >>= setX
+  LDY -> value >>= setY
+  STA -> readPrimVar r.regA >>= store bus addr
+  STX -> readPrimVar r.regX >>= store bus addr
+  STY -> readPrimVar r.regY >>= store bus addr
+  TAX -> readPrimVar r.regA >>= setX
+  TAY -> readPrimVar r.regA >>= setY
+  TXA -> readPrimVar r.regX >>= setA
+  TYA -> readPrimVar r.regY >>= setA
+  TSX -> readPrimVar r.regSP >>= setX
+  TXS -> readPrimVar r.regX >>= writePrimVar r.regSP
+  ADC -> value >>= add
+  SBC -> value >>= add . complement
+  AND -> withA (.&.)
+  ORA -> withA (.|.)
+  EOR -> withA xor
+  CMP -> readPrimVar r.regA >>= compareWith
+  CPX -> readPrimVar r.regX >>= compareWith
+  CPY -> readPrimVar r.regY >>= compareWith
+  BIT -> do
+    v <- value
+    acc <- readPrimVar r.regA
+    modify r.regP (\status -> status .&. 0x3F .|. v .&. 0xC0)
+    setFlag r zero (acc .&. v == 0)
+  INC -> modifyMemory (+ 1)
+  DEC -> modifyMemory (subtract 1)
+  INX -> readPrimVar r.regX >>= setX . (+ 1)
+  INY -> readPrimVar r.regY >>= setY . (+ 1)
+  DEX -> readPrimVar r.regX >>= setX . subtract 1
+  DEY -> readPrimVar r.regY >>= setY . subtract 1
+  ASL -> shift (\_ v -> v `shiftL` 1) 7
+  LSR -> shift (\_ v -> v `shiftR` 1) 0
+  ROL -> shift (\c v -> v `shiftL` 1 .|. c) 7
+  ROR -> shift (\c v -> v `shiftR` 1 .|. c `shiftL` 7) 0
+  BCC -> branch (not <$> flag carry)
   BCS -> branch (flag carry)
-  BNE -> branch (not (flag zero))
+  BNE -> branch (not <$> flag zero)
   BEQ -> branch (flag zero)
-  BPL -> branch (not (flag negative))
+  BPL -> branch (not <$> flag negative)
   BMI -> branch (flag negative)
-  BVC -> branch (not (flag overflow))
+  BVC -> branch (not <$> flag overflow)
   BVS -> branch (flag overflow)
-  CLC -> pure (setFlag carry False cpu)
-  SEC -> pure (setFlag carry True cpu)
-  CLI -> pure (setFlag interruptDisable False cpu)
-  SEI -> pure (setFlag interruptDisable True cpu)
-  CLD -> pure (setFlag decimal False cpu)
-  SED -> pure (setFlag decimal True cpu)
-  CLV -> pure (setFlag overflow False cpu)
-  PHA -> push bus cpu.a cpu
-  PHP -> push bus (cpu.p .|. breakBits) cpu
-  PLA -> do
-    (cpu', v) <- pull bus cpu
-    pure (setZN v cpu' {a = v})
-  PLP -> do
-    (cpu', v) <- pull bus cpu
-    pure cpu' {p = fromStack v}
-  JMP -> pure cpu {pc = addr}
-  JSR -> jumpTo addr <$> pushWord bus (cpu.pc - 1) cpu
-  RTS -> do
-    (cpu', ret) <- pullWord bus cpu
-    pure cpu' {pc = ret + 1}
+  CLC -> setFlag r carry False
+  SEC -> setFlag r carry True
+  CLI -> setFlag r interruptDisable False
+  SEI -> setFlag r interruptDisable True
+  CLD -> setFlag r decimal False
+  SED -> setFlag r decimal True
+  CLV -> setFlag r overflow False
+  PHA -> readPrimVar r.regA >>= push bus r
+  PHP -> readPrimVar r.regP >>= push bus r . (.|. breakBits)
+  PLA -> pull bus r >>= setA
+  PLP -> pull bus r >>= writePrimVar r.regP . fromStack
+  JMP -> writePrimVar r.regPC addr
+  JSR -> pushWord bus r (pc - 1) >> writePrimVar r.regPC addr
+  RTS -> pullWord bus r >>= writePrimVar r.regPC . (+ 1)
   RTI -> do
-    (cpu', v) <- pull bus cpu
-    (cpu'', ret) <- pullWord bus cpu'
-    pure cpu'' {p = fromStack v, pc = ret}
+    pull bus r >>= writePrimVar r.regP . fromStack
+    pullWord bus r >>= writePrimVar r.regPC
   -- BRK skips a padding byte after the opcode.
-  BRK -> interrupt bus 0xFFFE (cpu.p .|. breakBits) cpu {pc = cpu.pc + 1}
-  NOP -> pure cpu
+  BRK -> do
+    writePrimVar r.regPC (pc + 1)
+    readPrimVar r.regP >>= interrupt bus r 0xFFFE . (.|. breakBits)
+  NOP -> pure ()
   where
-    withValue f = f <$> load bus addr
-    setA v = setZN v cpu {a = v}
-    setX v = setZN v cpu {x = v}
-    setY v = setZN v cpu {y = v}
-    flag = testBit cpu.p
-    carryIn = if flag carry then 1 else 0
-    jumpTo target c = c {pc = target}
-    add v =
-      let sum16 = fromIntegral cpu.a + fromIntegral v + fromIntegral carryIn :: Word16
-          r = fromIntegral sum16
-       in setFlag carry (sum16 > 0xFF) $
-            setFlag overflow (testBit ((cpu.a `xor` r) .&. (v `xor` r)) 7) (setA r)
-    compareWith reg v = setFlag carry (reg >= v) (setZN (reg - v) cpu)
-    modify f = do
-      v <- load bus addr
-      store bus addr (f v)
-      pure (setZN (f v) cpu)
+    value = load bus addr
+    setA v = writePrimVar r.regA v >> setZN r v
+    setX v = writePrimVar r.regX v >> setZN r v
+    setY v = writePrimVar r.regY v >> setZN r v
+    flag i = (`testBit` i) <$> readPrimVar r.regP
+    carryIn = (\c -> if c then 1 else 0) <$> flag carry
+    withA f = do
+      v <- value
+      acc <- readPrimVar r.regA
+      setA (f acc v)
+    add v = do
+      acc <- readPrimVar r.regA
+      c <- carryIn
+      let sum16 = fromIntegral acc + fromIntegral v + fromIntegral c :: Word16
+          result = fromIntegral sum16
+      setA result
+      setFlag r overflow (testBit ((acc `xor` result) .&. (v `xor` result)) 7)
+      setFlag r carry (sum16 > 0xFF)
+    compareWith reg = do
+      v <- value
+      setZN r (reg - v)
+      setFlag r carry (reg >= v)
+    modifyMemory f = do
+      v <- f <$> value
+      store bus addr v
+      setZN r v
     -- Shift or rotate; the carry takes the bit shifted out.
-    shift f outBit
-      | mode == Acc = pure (setFlag carry (testBit cpu.a outBit) (setA (f cpu.a)))
-      | otherwise = do
-          v <- load bus addr
-          store bus addr (f v)
-          pure (setFlag carry (testBit v outBit) (setZN (f v) cpu))
+    shift f outBit = do
+      c <- carryIn
+      if mode == Acc
+        then do
+          v <- readPrimVar r.regA
+          setA (f c v)
+          setFlag r carry (testBit v outBit)
+        else do
+          v <- value
+          store bus addr (f c v)
+          setZN r (f c v)
+          setFlag r carry (testBit v outBit)
     -- A taken branch costs a cycle, two if it lands on another page.
-    branch taken
-      | taken = pure cpu {pc = addr, cycles = cpu.cycles + if page addr == page cpu.pc then 1 else 2}
-      | otherwise = pure cpu
+    branch condition = do
+      taken <- condition
+      when taken $ do
+        writePrimVar r.regPC addr
+        modify r.clock (+ if page addr == page pc then 1 else 2)
 
 -- * Status flags
 
@@ -343,27 +391,31 @@ breakBits = 0x30
 fromStack :: Word8 -> Word8
 fromStack v = v .&. 0xCF .|. 0x20
 
-setFlag :: Int -> Bool -> CPU -> CPU
-setFlag i on cpu = cpu {p = if on then setBit cpu.p i else clearBit cpu.p i}
+setFlag :: Registers s -> Int -> Bool -> ST s ()
+setFlag r i on = modify r.regP (\status -> if on then setBit status i else clearBit status i)
 
-setZN :: Word8 -> CPU -> CPU
-setZN v = setFlag zero (v == 0) . setFlag negative (testBit v 7)
+setZN :: Registers s -> Word8 -> ST s ()
+setZN r v = modify r.regP (\status -> (if testBit v 7 then setBit else clearBit) ((if v == 0 then setBit else clearBit) status zero) negative)
 
 -- * Stack
 
-push :: Bus s -> Word8 -> CPU -> ST s CPU
-push bus v cpu = cpu {sp = cpu.sp - 1} <$ store bus (0x100 + fromIntegral cpu.sp) v
+push :: Bus s -> Registers s -> Word8 -> ST s ()
+push bus r v = do
+  sp <- readPrimVar r.regSP
+  store bus (0x100 + fromIntegral sp) v
+  writePrimVar r.regSP (sp - 1)
 
-pull :: Bus s -> CPU -> ST s (CPU, Word8)
-pull bus cpu = (cpu',) <$> load bus (0x100 + fromIntegral cpu'.sp)
-  where
-    cpu' = cpu {sp = cpu.sp + 1}
+pull :: Bus s -> Registers s -> ST s Word8
+pull bus r = do
+  sp <- (+ 1) <$> readPrimVar r.regSP
+  writePrimVar r.regSP sp
+  load bus (0x100 + fromIntegral sp)
 
-pushWord :: Bus s -> Word16 -> CPU -> ST s CPU
-pushWord bus w cpu = push bus (fromIntegral (w `shiftR` 8)) cpu >>= push bus (fromIntegral w)
+pushWord :: Bus s -> Registers s -> Word16 -> ST s ()
+pushWord bus r w = push bus r (fromIntegral (w `shiftR` 8)) >> push bus r (fromIntegral w)
 
-pullWord :: Bus s -> CPU -> ST s (CPU, Word16)
-pullWord bus cpu = do
-  (cpu', lo) <- pull bus cpu
-  (cpu'', hi) <- pull bus cpu'
-  pure (cpu'', fromIntegral hi `shiftL` 8 .|. fromIntegral lo)
+pullWord :: Bus s -> Registers s -> ST s Word16
+pullWord bus r = do
+  lo <- pull bus r
+  hi <- pull bus r
+  pure $! fromIntegral hi `shiftL` 8 .|. fromIntegral lo

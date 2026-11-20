@@ -45,14 +45,19 @@ library
   build-depends:
     array ^>=0.5.8,
     bytestring ^>=0.12.2,
+    primitive ^>=0.9.1,
     vector ^>=0.13.2,
 
 executable nes
   import: shared
   hs-source-dirs: app
   main-is: Main.hs
-  -- SDL calls the audio callback from its own thread.
-  ghc-options: -threaded
+  -- SDL calls the audio callback from its own thread. A big allocation
+  -- area means fewer garbage collections.
+  ghc-options:
+    -threaded
+    -with-rtsopts=-A16m
+
   build-depends:
     bytestring,
     containers ^>=0.8,

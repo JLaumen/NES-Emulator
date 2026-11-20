@@ -45,16 +45,21 @@ command-line option turns it on, like `--debug`, `--vsync`, `--pause`,
   scanline counter ticks at dot 260 of each rendered line, between which
   `NES` answers IRQs), `Bus` (CPU memory map, PRG RAM at $6000), `CPU` (official
   6502 opcodes, per-instruction cycle counts; unofficial opcodes act as 1-byte
-  NOPs), `PPU` (registers, VRAM, OAM; renders background and
-  sprites a scanline at a time), `APU` (a pure state machine in an `STRef`,
+  NOPs; the registers are unboxed `PrimVar`s, and `CPU` is a snapshot of
+  them), `PPU` (registers, VRAM, OAM; renders background and
+  sprites a scanline at a time), `APU` (what the registers and frame
+  counter set is a pure record in an `STRef`; the timers and positions
+  that change every few cycles are unboxed `PrimVar`s, from `primitive`;
   caught up once a scanline; each 44.1 kHz sample averages the mix over
   its cycles, against aliasing; noise isn't averaged, to save time),
   `Controller` ($4016),
   `Visualise` (draws a snapshot of the PPU, APU and CPU into one picture),
   `NES` (public API: a lazy list of frames, each a picture, its sound and
-  its visuals, drawn only when used, from a lazy list of inputs (the
+  its visuals, drawn only when used and made only with `--debug`, as
+  keeping them costs time, from a lazy list of inputs (the
   buttons held and the console's speed against the sound card), run
-  scanline by scanline).
+  scanline by scanline; a jump or branch to itself, which waits for an
+  interrupt, is skipped ahead by whole turns).
 - CPU check: get `nestest.nes` and `nestest.log` (e.g. from
   christopherpow/nes-test-roms, `other/`), then
   `sed -E 's/^(....).*(A:.. X:.. Y:.. P:.. SP:..).*(CYC:[0-9]+)\r?$/\1 \2 \3/' nestest.log > expected.txt`

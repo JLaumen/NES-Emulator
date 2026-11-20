@@ -187,7 +187,7 @@ play options cart = do
             when options.debug (void (SDL.updateTexture visuals Nothing out.visuals (fromIntegral w * 4)))
             run (count - 1) buttons rest
           [] -> pure Nothing
-  loop False 0 . frames (if options.noFlicker then 64 else 8) options.palette cart =<< getChanContents inputs
+  loop False 0 . frames options.debug (if options.noFlicker then 64 else 8) options.palette cart =<< getChanContents inputs
   SDL.closeAudioDevice device
   SDL.quit
 

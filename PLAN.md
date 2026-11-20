@@ -49,6 +49,14 @@ Each step ends with something we can check.
     Check: Super Mario Bros. 3 plays, its status bar steady.
 20. [x] **Shadow mask**: `--mask` tints the three columns of each 3×
     pixel red, green and blue, like a CRT's phosphor stripes.
+21. [x] **Speed**: the PPU fetches a background tile once, not for each of
+    its 8 pixels, and sprites claim their pixels over the background's;
+    `picture` builds the RGB in one pass; loads are strict; the work for
+    `--debug` happens only with it; the CPU's registers and the APU's
+    timers are unboxed mutable variables; a loop that waits for an
+    interrupt is skipped; the program asks for a bigger allocation area.
+    600 frames take 0.8 s, not 2.2 s (SMB), and 0.95 s, not 2.3 s
+    (SMB3), with the same picture, sound and visuals.
 
 ## Next
 
@@ -148,75 +156,62 @@ table the sprites use.
 
 ## Optimisations
 
-A frame takes about 6 ms (a third of a core at 60 Hz), so none is
-needed yet; they would buy room for run-ahead and fast-forward, and fewer
-garbage-collector pauses.
+A frame takes about 1.5 ms (a tenth of a core at 60 Hz), 6 ms with
+`--debug`, so more speed isn't needed; it would only buy room for
+run-ahead and fast-forward.
 
-Measure first: a `--bench` option that runs a ROM for a few thousand
-frames without a window, and prints the time a frame; then profile
-(`+RTS -p`, or the eventlog with `+RTS -l`).
+Measured with headless loops over 600 frames of Super Mario Bros. and
+Super Mario Bros. 3 (2.2 s and 2.3 s at first, 0.8 s and 0.95 s now; with
+`--debug`, 8.2 ms a frame at first), checking that the picture, sound
+and visuals stay exactly the same, and with GHC's profiler (build with
+`--enable-profiling`). Both games spend their time in the same places.
+Done: a background tile fetched once for its 8 pixels; sprites drawn
+over the line's background, not searched for at each pixel; `picture`
+written in one pass; strict loads; the noise and DMC stepped with a
+loop, not `iterate`; `-A16m`; the heat maps and the channels' levels
+kept only with `--debug` (7%); the APU's timers and positions in unboxed
+mutable variables, not rebuilt records (9%); the CPU's registers likewise
+(4–7%); a jump or branch to itself, which waits for an interrupt,
+skipped ahead by whole turns, exactly as if run (15% on SMB, which waits
+so; nothing on SMB3, which doesn't); in the visuals, a nametable
+that mirrors another copied, not drawn again, and tiles drawn without a
+`Maybe` a pixel.
 
-Doing less:
+Tried, and worth 2% or less, so dropped: unchecked array indexing,
+`INLINE` pragmas, `-fspecialise-aggressively` with
+`-fexpose-all-unfoldings`, strict fields in the CPU's opcode table, a
+strict `address` in the CPU, a list-free `mix`, list-free frame-counter
+steps, leaving silent pulses out of the APU's stops, a lighter sprite
+search, reading the mirroring once a line, list-free colour sums in the
+visuals, the page-crossing cycle as a flag in the opcode table,
+`StrictData`, inlining the CPU's step into its loop (2%), `-A64m` and
+the non-moving collector (the longest pause is already 0.2 ms). Measured and not worth doing: a table for the noise's shift
+register (2% at most, by skipping it); SDL's own audio queue in place of
+the `Seq` (which costs 0.03 ms a frame); the visuals on another core
+(shown a frame late, for time that fits in a frame already); unboxed
+mutable PPU registers (their code takes 0.4% of the time);
+unchecked reads of the program banks (3%), or none for NROM (4%, NROM
+only).
 
-- Work for `--debug` only: the bus marks every read and write in two
-  64 KB heat maps, and cools and copies both each frame; the PPU copies
-  its 16 KB of memory each frame for the snapshot; the APU keeps every
-  channel's level at every sample for the oscilloscopes. Do all three
-  only with `--debug`.
-- The PPU: each pixel of the background looks up its tile, attribute and
-  pattern again; decode a tile's row once for its 8 pixels. Each pixel
-  searches the line's sprites; draw the sprites into a line buffer once
-  instead. Each pixel's colour goes through `resolve`; keep the palette
-  where it can be read directly.
-- The picture: `picture` builds its RGB bytes one at a time with `div`
-  and `mod`; write them three at a time into a buffer.
-- The CPU: whether an instruction takes the page-crossing cycle is a
-  search of a list on every instruction; make it part of the table.
-  Every read of ROM or pattern tables looks up its bank in `Mapper`
-  (about 15% of a frame's time since MMC3 came); NROM could skip it.
-- The APU steps the noise's shift register one tick at a time; a table of
-  its 32767- and 93-step sequences would jump straight there. Its tables
-  are lists indexed with `!!`; arrays would do. It builds lists of levels
-  to mix at every step; unboxed values would do, and the mix itself is
-  two small lookup tables (31 and 203 entries), as nesdev describes.
-- The sound queue is a `Seq` of boxed `Float`s; SDL's own queue
-  (`SDL_QueueAudio`) would replace it and the callback, and be simpler.
-- Fast-forward needn't draw the frames it skips; the picture is already
-  lazy, but the PPU still renders every line.
-- Maybe not: skipping a CPU's idle loop while it waits for vblank is fast
-  but needs per-game care.
+More cores: the whole program uses 14% of a core (SDL's dummy drivers,
+both games): 1.7 ms of emulation and 0.7 ms of the window's work a
+frame. More cores only shorten a frame's wall time, which waits for the
+sound card or the refresh anyway; they'd matter only for fast-forward.
+The emulation on a thread of its own could hide only the 0.7 ms, and
+would show the buttons a frame late. The APU on another core could
+take at most its 15%, but the CPU still needs its length counters
+($4015) and IRQs in step. The PPU's lines are 40% of a frame, but the
+CPU reads sprite-0 hits and MMC3 counts lines as they're drawn, and
+MMC3 games switch pattern banks mid-frame, so drawing later needs a
+snapshot of all that for every line.
 
-Without changing the algorithms:
+Fast-forward, when it comes, can skip drawing the frames it doesn't
+show: up to 40% of each, less the sprite-0 checks games still need.
 
-- GHC: try `-fllvm`, `-fspecialise-aggressively` and
-  `-fexpose-all-unfoldings`; read the Core of the hot loops (CPU step, PPU
-  line, APU run) for boxing and missed specialisation, and add `INLINE`,
-  `SPECIALISE` or strictness where it helps.
-- Allocation: the CPU's record is rebuilt with each instruction, and the
-  PPU's registers and the APU are records in `STRef`s, rebuilt with each
-  change; a worker-wrapped loop, unboxed mutable fields (`primitive`'s
-  `MutVar`s, or small unboxed arrays) and strict, unpacked fields
-  (`StrictData`) allocate less.
-- The runtime: a larger allocation area (`-with-rtsopts=-A64m`) means
-  fewer collections; the non-moving collector shortens pauses, which can
-  cost a refresh.
-- More cores (the program is already `-threaded`):
-  - Draw the `--debug` visuals on another core; they're a pure value
-    of each frame.
-  - Run the emulation on its own thread, a frame ahead of the one being
-    shown, handing frames to the SDL thread through a channel.
-  - Run the APU a frame behind on another core, from a log of its register
-    writes and their cycles; the CPU would still need the frame IRQ and
-    the length counters ($4015) in step.
-  - Draw the PPU's pixels on another core from a log of its register
-    writes, keeping on the CPU's side only what it can observe (status,
-    sprite-0 hit, which needs some pixels after all).
-  - With run-ahead, run the frames ahead on another core alongside the
-    real one.
-- The GPU already scales the picture to the window and draws it (SDL's
-  accelerated renderer). The emulation can't move there: it is one long
-  chain of steps, each needing the last, where a GPU is fast only at
-  many independent ones. Only per-pixel work could: the palette lookup
-  (send 61 KB of colour indices a frame, not 184 KB of RGB) and CRT
-  effects in a shader. SDL2's renderer has no shaders, so that means
-  OpenGL directly, for little gain; worth it only with real CRT shaders.
+`-fllvm` makes it 10% faster, but GHC 9.14 supports LLVM only up to 20
+(LLVM 22 works, with a warning), and every build, CI's too, would need
+LLVM; the README mentions it instead.
+
+The GPU already scales the picture to the window and draws it. The
+emulation can't move there: it is one long chain of steps, each needing
+the last, where a GPU is fast only at many independent ones.

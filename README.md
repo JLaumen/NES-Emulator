@@ -20,6 +20,10 @@ package sdl2
   extra-include-dirs: /usr/include/SDL2
 ```
 
+With LLVM installed (`llvm` on Fedora), `cabal run --ghc-options=-fllvm
+nes -- game.nes` builds a version that runs about 10% faster, which only
+matters on slow machines.
+
 Keys: arrows, X (A), Z (B), Enter (Start), right Shift (Select).
 
 `cabal run nes -- --debug game.nes` shows, beside the game, what the
